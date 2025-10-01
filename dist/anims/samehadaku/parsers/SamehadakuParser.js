@@ -12,12 +12,21 @@ class SamehadakuParser extends SamehadakuParserExtra_1.default {
         const httpOptions = {
             origin: normalizedBase,
             referer: `${normalizedBase}/`,
-            warmupPath: "/",
+            warmupPaths: ["/", "/anime-terbaru"],
             headersExtra: {
                 "Sec-Fetch-Site": "same-origin",
                 "Sec-Fetch-Mode": "navigate",
                 "Sec-Fetch-Dest": "document",
             },
+            rateLimit: {
+                maxConcurrent: 1,
+                intervalMs: 1_500,
+                jitterMs: 600,
+            },
+            browserFallback: {
+                enabled: true,
+            },
+            label: "samehadaku",
         };
         super(baseUrl, baseUrlPath, httpOptions);
     }

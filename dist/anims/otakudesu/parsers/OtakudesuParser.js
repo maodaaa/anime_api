@@ -11,12 +11,21 @@ class OtakudesuParser extends OtakudesuParserExtra_1.default {
         const httpOptions = {
             origin: normalizedBase,
             referer: `${normalizedBase}/`,
-            warmupPath: "/",
+            warmupPaths: ["/", "/anime-terbaru"],
             headersExtra: {
                 "Sec-Fetch-Site": "same-origin",
                 "Sec-Fetch-Mode": "navigate",
                 "Sec-Fetch-Dest": "document",
             },
+            rateLimit: {
+                maxConcurrent: 2,
+                intervalMs: 900,
+                jitterMs: 400,
+            },
+            browserFallback: {
+                enabled: true,
+            },
+            label: "otakudesu",
         };
         super(baseUrl, baseUrlPath, httpOptions);
     }
@@ -171,8 +180,9 @@ class OtakudesuParser extends OtakudesuParserExtra_1.default {
     }
     parseSearch(q) {
         return this.scrape({
-            path: `?s=${q}&post_type=anime`,
+            path: `?s=${encodeURIComponent(q)}&post_type=anime`,
             initialData: { animeList: [] },
+            requestLabel: `search:${q}`,
         }, async ($, data) => {
             const animeElements = $("ul.chivsrc li").toArray();
             animeElements.forEach((animeElement) => {

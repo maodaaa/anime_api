@@ -16,6 +16,35 @@ const USER_AGENTS: readonly string[] = [
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
 ];
 
+export type UpstreamBlockReason =
+  | "browser_challenge"
+  | "rate_limited"
+  | "bot_block"
+  | "geo_block"
+  | "unauthorized"
+  | "maintenance"
+  | "network"
+  | "unknown";
+
+export interface UpstreamDiagnostic {
+  status?: number;
+  reason: UpstreamBlockReason;
+  provider?: "cloudflare" | "akamai" | "fastly" | "unknown";
+  fingerprint?: string;
+  headers?: Record<string, string>;
+  snippet?: string;
+  url?: string;
+  method?: string;
+  requestLabel?: string;
+}
+
+declare module "axios" {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  interface AxiosError<T = unknown, D = any> {
+    upstream?: UpstreamDiagnostic;
+  }
+}
+
 export interface FetcherOptions {
   baseURL?: string;
   origin?: string;
@@ -31,6 +60,107 @@ export interface FetcherContext {
 }
 
 const fetcherCache = new Map<string, FetcherContext>();
+
+function normalizeHeaders(headers?: Record<string, unknown>): Record<string, string> {
+  const normalized: Record<string, string> = {};
+  if (!headers) return normalized;
+
+  for (const [key, value] of Object.entries(headers)) {
+    if (value === undefined || value === null) continue;
+    const val = Array.isArray(value) ? value.join(", ") : String(value);
+    normalized[key.toLowerCase()] = val;
+  }
+
+  return normalized;
+}
+
+function extractSnippet(data: unknown): string | undefined {
+  if (typeof data === "string") {
+    const trimmed = data.trim();
+    return trimmed.slice(0, 320);
+  }
+
+  if (Buffer.isBuffer(data)) {
+    return data.toString("utf8", 0, 320);
+  }
+
+  return undefined;
+}
+
+function detectProvider(headers: Record<string, string>): UpstreamDiagnostic["provider"] {
+  if (headers["cf-ray"] || headers["cf-mitigated"] || headers["server"]?.toLowerCase().includes("cloudflare")) {
+    return "cloudflare";
+  }
+
+  if (headers["server"]?.toLowerCase().includes("akamai")) {
+    return "akamai";
+  }
+
+  if (headers["server"]?.toLowerCase().includes("fastly")) {
+    return "fastly";
+  }
+
+  return "unknown";
+}
+
+function analyzeUpstreamError(error: AxiosError): UpstreamDiagnostic | undefined {
+  const status = error.response?.status;
+  if (!status) return undefined;
+
+  const headers = normalizeHeaders(error.response?.headers as Record<string, unknown> | undefined);
+  const snippet = extractSnippet(error.response?.data);
+  const provider = detectProvider(headers);
+
+  const fingerprintParts = [String(status)];
+  if (headers["cf-ray"]) fingerprintParts.push(headers["cf-ray"]);
+  if (headers["server-timing"]) fingerprintParts.push(headers["server-timing"]);
+  if (headers["x-envoy-upstream-service-time"]) {
+    fingerprintParts.push(`envoy:${headers["x-envoy-upstream-service-time"]}`);
+  }
+
+  const fingerprint = fingerprintParts.join("|");
+
+  let reason: UpstreamBlockReason = "unknown";
+
+  if (status === 429 || headers["retry-after"]) {
+    reason = "rate_limited";
+  } else if (status === 401) {
+    reason = "unauthorized";
+  } else if ([502, 503, 504].includes(status)) {
+    reason = "maintenance";
+  } else if (status >= 500) {
+    reason = "maintenance";
+  } else if (status === 403) {
+    const cfMitigated = headers["cf-mitigated"] || "";
+    const body = snippet?.toLowerCase() ?? "";
+
+    if (cfMitigated.includes("challenge") || body.includes("cloudflare") || body.includes("cf-chl")) {
+      reason = "browser_challenge";
+    } else if (body.includes("access denied") || body.includes("blocked") || cfMitigated.includes("bot") || cfMitigated.includes("block")) {
+      reason = "bot_block";
+    } else if (body.includes("country") && body.includes("restricted")) {
+      reason = "geo_block";
+    } else {
+      reason = "bot_block";
+    }
+  }
+
+  return {
+    status,
+    reason,
+    provider,
+    fingerprint,
+    headers: {
+      ...(headers["cf-ray"] ? { "cf-ray": headers["cf-ray"] } : {}),
+      ...(headers["cf-mitigated"] ? { "cf-mitigated": headers["cf-mitigated"] } : {}),
+      ...(headers["retry-after"] ? { "retry-after": headers["retry-after"] } : {}),
+      ...(headers["server"] ? { server: headers["server"] } : {}),
+    },
+    snippet,
+    url: error.config?.url,
+    method: (error.config?.method ?? "GET").toUpperCase(),
+  };
+}
 
 function createCookieJar(existing?: CookieJar): CookieJar {
   if (existing) return existing;
@@ -59,6 +189,12 @@ function buildDefaultHeaders(options: FetcherOptions, ua: string): Record<string
     "Upgrade-Insecure-Requests": "1",
     Pragma: "no-cache",
     "Cache-Control": "no-cache",
+    "Sec-Fetch-Site": options.origin ? "same-origin" : "none",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Ch-Ua": "\"Not.A/Brand\";v=\"8\", \"Chromium\";v=\"124\", \"Google Chrome\";v=\"124\"",
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Platform": "\"Windows\"",
   };
 
   if (options.origin) {
@@ -138,6 +274,20 @@ export function createFetcher(options: FetcherOptions = {}): FetcherContext {
 
     return config;
   });
+
+  client.interceptors.response.use(
+    (response) => response,
+    (error: unknown) => {
+      if (axios.isAxiosError(error)) {
+        const diagnostic = analyzeUpstreamError(error);
+        if (diagnostic) {
+          error.upstream = diagnostic;
+        }
+      }
+
+      return Promise.reject(error);
+    }
+  );
 
   return { client, jar };
 }

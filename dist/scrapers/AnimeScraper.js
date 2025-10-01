@@ -1,13 +1,39 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+const axios_1 = __importStar(require("axios"));
 const cheerio_1 = require("cheerio");
 const path_1 = __importDefault(require("path"));
+const p_queue_1 = __importDefault(require("p-queue"));
 const animeConfig_1 = __importDefault(require("../configs/animeConfig"));
 const error_1 = require("../helpers/error");
 const dataFetcher_1 = require("../services/dataFetcher");
+const browserFetcher_1 = require("../services/browserFetcher");
 const { scraper } = animeConfig_1.default;
 class AnimeScraper {
     constructor(baseUrl, baseUrlPath, httpOptions) {
@@ -20,8 +46,127 @@ class AnimeScraper {
             referer: httpOptions?.referer ?? `${this.baseUrl}/`,
             headersExtra: httpOptions?.headersExtra,
             warmupPath: httpOptions?.warmupPath,
+            warmupPaths: httpOptions?.warmupPaths,
             timeoutMs: httpOptions?.timeoutMs,
+            rateLimit: httpOptions?.rateLimit,
+            browserFallback: httpOptions?.browserFallback,
+            label: httpOptions?.label,
         };
+        const warmupCandidates = [
+            ...(httpOptions?.warmupPaths ?? []),
+            ...(httpOptions?.warmupPath ? [httpOptions.warmupPath] : []),
+        ].filter((value) => typeof value === "string" && value.length > 0);
+        this.warmupPaths = warmupCandidates.length > 0 ? warmupCandidates : [];
+        const configuredRateLimit = httpOptions?.rateLimit
+            ? { ...httpOptions.rateLimit }
+            : undefined;
+        if (configuredRateLimit && configuredRateLimit.jitterMs === undefined) {
+            configuredRateLimit.jitterMs = animeConfig_1.default.scraper?.defaultRateLimit?.jitterMs;
+        }
+        this.rateLimitOptions = configuredRateLimit;
+        const browserFallbackDefaults = animeConfig_1.default.scraper?.browserFallback ?? {};
+        const enabled = httpOptions?.browserFallback?.enabled ?? browserFallbackDefaults.enabled ?? false;
+        this.browserFallbackConfig = {
+            enabled,
+            waitUntil: httpOptions?.browserFallback?.waitUntil ??
+                browserFallbackDefaults.waitUntil ??
+                "domcontentloaded",
+            navigationTimeoutMs: httpOptions?.browserFallback?.navigationTimeoutMs ??
+                browserFallbackDefaults.navigationTimeoutMs ??
+                25_000,
+            headless: httpOptions?.browserFallback?.headless ??
+                browserFallbackDefaults.headless ??
+                true,
+            userAgent: httpOptions?.browserFallback?.userAgent ??
+                browserFallbackDefaults.userAgent,
+        };
+        this.label = httpOptions?.label;
+    }
+    getRequestQueue() {
+        if (!this.rateLimitOptions)
+            return undefined;
+        if (this.requestQueue)
+            return this.requestQueue;
+        const { maxConcurrent = 1, intervalMs, intervalCap, } = this.rateLimitOptions;
+        const queue = new p_queue_1.default({
+            concurrency: Math.max(1, maxConcurrent),
+            ...(intervalMs && intervalMs > 0
+                ? {
+                    interval: intervalMs,
+                    intervalCap: intervalCap ?? Math.max(1, maxConcurrent),
+                    carryoverConcurrencyCount: true,
+                }
+                : {}),
+        });
+        this.requestQueue = queue;
+        return queue;
+    }
+    async applyRateLimitDelay() {
+        const jitter = this.rateLimitOptions?.jitterMs ?? 0;
+        if (jitter <= 0)
+            return;
+        const waitFor = Math.random() * jitter;
+        if (waitFor <= 0)
+            return;
+        await new Promise((resolve) => setTimeout(resolve, waitFor));
+    }
+    isBrowserFallbackEnabled() {
+        return this.browserFallbackConfig.enabled === true;
+    }
+    getRequestLabel(config) {
+        const suffix = config.url ?? this.baseUrlPath ?? "";
+        return this.label ? `${this.label}:${suffix}` : suffix;
+    }
+    shouldAttemptBrowserFallback(error) {
+        if (!this.isBrowserFallbackEnabled())
+            return false;
+        if (!axios_1.default.isAxiosError(error))
+            return false;
+        const upstream = error.upstream;
+        if (!upstream)
+            return false;
+        return ["browser_challenge", "bot_block", "geo_block"].includes(upstream.reason);
+    }
+    async tryBrowserFallbackFetch(resolvedUrl, config, requestLabel) {
+        try {
+            const sourceHeaders = config.headers instanceof axios_1.AxiosHeaders
+                ? config.headers
+                : axios_1.AxiosHeaders.from((config.headers ?? {}));
+            const sanitizedHeaders = {};
+            const jsonHeaders = sourceHeaders.toJSON();
+            for (const [key, value] of Object.entries(jsonHeaders)) {
+                if (value === undefined || value === null)
+                    continue;
+                sanitizedHeaders[key] = Array.isArray(value) ? value.join(", ") : String(value);
+            }
+            const html = await (0, browserFetcher_1.fetchPageWithBrowser)({
+                url: resolvedUrl,
+                referer: this.httpOptions.referer,
+                userAgent: this.browserFallbackConfig.userAgent,
+                waitUntil: this.browserFallbackConfig.waitUntil,
+                timeoutMs: this.browserFallbackConfig.navigationTimeoutMs,
+                headless: this.browserFallbackConfig.headless,
+                headers: sanitizedHeaders,
+                label: requestLabel ?? this.getRequestLabel(config),
+            });
+            return html ?? undefined;
+        }
+        catch (error) {
+            return undefined;
+        }
+    }
+    attachDiagnostics(error, config) {
+        if (!axios_1.default.isAxiosError(error))
+            return;
+        const upstream = error.upstream;
+        if (!upstream)
+            return;
+        const resolvedUrl = this.resolveRequestUrl(config);
+        if (resolvedUrl) {
+            upstream.url = resolvedUrl;
+        }
+        upstream.method = (config.method ?? "GET").toUpperCase();
+        upstream.requestLabel = this.getRequestLabel(config);
     }
     deepCopy(obj) {
         if (obj === null || typeof obj !== "object")
@@ -85,8 +230,15 @@ class AnimeScraper {
                     headersExtra: this.httpOptions.headersExtra,
                     timeoutMs: this.httpOptions.timeoutMs,
                 });
-                if (!this.warmupCompleted && this.httpOptions.warmupPath) {
-                    await (0, dataFetcher_1.warmup)(client, this.httpOptions.warmupPath);
+                if (!this.warmupCompleted && this.warmupPaths.length > 0) {
+                    for (const warmupPath of this.warmupPaths) {
+                        try {
+                            await (0, dataFetcher_1.warmup)(client, warmupPath);
+                        }
+                        catch (error) {
+                        }
+                        await this.applyRateLimitDelay();
+                    }
                     this.warmupCompleted = true;
                 }
                 return client;
@@ -233,11 +385,26 @@ class AnimeScraper {
             await this.enforceRobots(config);
         }
         const client = await this.getHttpClient();
-        return client.request(config);
+        const executeRequest = async () => {
+            await this.applyRateLimitDelay();
+            return client.request(config);
+        };
+        const queue = this.getRequestQueue();
+        if (queue) {
+            const response = await queue.add(executeRequest);
+            return response;
+        }
+        return executeRequest();
     }
     async request(config, options) {
-        const response = await this.requestRaw(config, options);
-        return response.data;
+        try {
+            const response = await this.requestRaw(config, options);
+            return response.data;
+        }
+        catch (error) {
+            this.attachDiagnostics(error, config);
+            throw error;
+        }
     }
     str(string) {
         return string?.trim() || "";
@@ -323,13 +490,45 @@ class AnimeScraper {
     }
     async scrape(props, parser) {
         const path = this.generateUrlPath([props.path]);
-        const html = await this.request({
+        const allowBrowserFallback = props.allowBrowserFallback ?? true;
+        const preferBrowser = props.preferBrowser ?? false;
+        const requestConfig = {
             url: path,
             method: "GET",
             responseType: "text",
             transformResponse: (data) => data,
             ...props.axiosConfig,
-        }, { skipRobotsCheck: false });
+        };
+        let html;
+        if (preferBrowser && this.isBrowserFallbackEnabled() && allowBrowserFallback) {
+            const resolvedUrl = this.resolveRequestUrl(requestConfig);
+            if (resolvedUrl) {
+                html = await this.tryBrowserFallbackFetch(resolvedUrl, requestConfig, props.requestLabel);
+            }
+        }
+        if (!html) {
+            try {
+                html = await this.request(requestConfig, { skipRobotsCheck: false });
+            }
+            catch (error) {
+                this.attachDiagnostics(error, requestConfig);
+                if (allowBrowserFallback && this.shouldAttemptBrowserFallback(error)) {
+                    const resolvedUrl = this.resolveRequestUrl(requestConfig);
+                    if (resolvedUrl) {
+                        const fallbackHtml = await this.tryBrowserFallbackFetch(resolvedUrl, requestConfig, props.requestLabel);
+                        if (fallbackHtml) {
+                            html = fallbackHtml;
+                        }
+                    }
+                }
+                if (html === undefined) {
+                    throw error;
+                }
+            }
+        }
+        if (typeof html !== "string" || html.length === 0) {
+            (0, error_1.setResponseError)(502, "upstream tidak mengirimkan konten");
+        }
         const $ = (0, cheerio_1.load)(html);
         const data = parser($, this.deepCopy(props.initialData));
         return data;

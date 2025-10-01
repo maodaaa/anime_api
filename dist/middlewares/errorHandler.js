@@ -23,11 +23,36 @@ function resolveTargetUrl(error) {
     }
     return url || baseURL || "";
 }
+function describeUpstreamBlock(targetUrl, upstream) {
+    const provider = upstream?.provider && upstream.provider !== "unknown"
+        ? upstream.provider
+        : "sumber upstream";
+    const context = upstream?.requestLabel ? ` [request: ${upstream.requestLabel}]` : "";
+    switch (upstream?.reason) {
+        case "browser_challenge":
+            return `Permintaan memerlukan verifikasi browser oleh ${provider} (${targetUrl}). Aktifkan SCRAPER_BROWSER_FALLBACK=true untuk menggunakan fallback Playwright atau coba lagi secara manual.${context}`;
+        case "bot_block":
+            return `Permintaan diblokir oleh ${provider} (${targetUrl}). Kurangi frekuensi permintaan, pastikan header sudah lengkap, atau gunakan fallback browser bila diizinkan.${context}`;
+        case "geo_block":
+            return `Akses ke ${targetUrl} dibatasi berdasarkan lokasi oleh ${provider}. Layanan tidak dapat meneruskan permintaan ini.${context}`;
+        case "rate_limited":
+            return `Sumber upstream (${targetUrl}) menerapkan rate limit. Sistem sudah mencoba ulang otomatis, mohon beri jeda sebelum mencoba kembali.${context}`;
+        case "maintenance":
+            return `Sumber upstream (${targetUrl}) sedang tidak stabil atau dalam perawatan (HTTP ${upstream?.status ?? 503}). Silakan coba lagi nanti.${context}`;
+        case "unauthorized":
+            return `Permintaan ke ${targetUrl} memerlukan otorisasi tambahan dari ${provider}. Endpoint ini tidak dapat diakses tanpa kredensial yang valid.${context}`;
+        case "network":
+            return `Permintaan ke ${targetUrl} gagal karena kendala jaringan. Mohon periksa koneksi dan coba ulang.${context}`;
+        default:
+            return `Permintaan ke ${targetUrl} ditolak oleh sumber upstream.${context}`;
+    }
+}
 function buildAxiosMessage(error) {
     const status = error?.response?.status;
     const targetUrl = resolveTargetUrl(error);
-    if (status === 403) {
-        return `Permintaan diblokir oleh sumber upstream (${targetUrl}). Kemungkinan sistem anti-bot mendeteksi aktivitas otomatis.`;
+    const upstream = error?.upstream;
+    if (upstream) {
+        return describeUpstreamBlock(targetUrl, upstream);
     }
     if (status === 429) {
         return `Sumber upstream (${targetUrl}) meminta jeda (HTTP 429). Silakan coba lagi setelah beberapa saat.`;

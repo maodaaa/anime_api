@@ -43,6 +43,101 @@ const USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
 ];
 const fetcherCache = new Map();
+function normalizeHeaders(headers) {
+    const normalized = {};
+    if (!headers)
+        return normalized;
+    for (const [key, value] of Object.entries(headers)) {
+        if (value === undefined || value === null)
+            continue;
+        const val = Array.isArray(value) ? value.join(", ") : String(value);
+        normalized[key.toLowerCase()] = val;
+    }
+    return normalized;
+}
+function extractSnippet(data) {
+    if (typeof data === "string") {
+        const trimmed = data.trim();
+        return trimmed.slice(0, 320);
+    }
+    if (Buffer.isBuffer(data)) {
+        return data.toString("utf8", 0, 320);
+    }
+    return undefined;
+}
+function detectProvider(headers) {
+    if (headers["cf-ray"] || headers["cf-mitigated"] || headers["server"]?.toLowerCase().includes("cloudflare")) {
+        return "cloudflare";
+    }
+    if (headers["server"]?.toLowerCase().includes("akamai")) {
+        return "akamai";
+    }
+    if (headers["server"]?.toLowerCase().includes("fastly")) {
+        return "fastly";
+    }
+    return "unknown";
+}
+function analyzeUpstreamError(error) {
+    const status = error.response?.status;
+    if (!status)
+        return undefined;
+    const headers = normalizeHeaders(error.response?.headers);
+    const snippet = extractSnippet(error.response?.data);
+    const provider = detectProvider(headers);
+    const fingerprintParts = [String(status)];
+    if (headers["cf-ray"])
+        fingerprintParts.push(headers["cf-ray"]);
+    if (headers["server-timing"])
+        fingerprintParts.push(headers["server-timing"]);
+    if (headers["x-envoy-upstream-service-time"]) {
+        fingerprintParts.push(`envoy:${headers["x-envoy-upstream-service-time"]}`);
+    }
+    const fingerprint = fingerprintParts.join("|");
+    let reason = "unknown";
+    if (status === 429 || headers["retry-after"]) {
+        reason = "rate_limited";
+    }
+    else if (status === 401) {
+        reason = "unauthorized";
+    }
+    else if ([502, 503, 504].includes(status)) {
+        reason = "maintenance";
+    }
+    else if (status >= 500) {
+        reason = "maintenance";
+    }
+    else if (status === 403) {
+        const cfMitigated = headers["cf-mitigated"] || "";
+        const body = snippet?.toLowerCase() ?? "";
+        if (cfMitigated.includes("challenge") || body.includes("cloudflare") || body.includes("cf-chl")) {
+            reason = "browser_challenge";
+        }
+        else if (body.includes("access denied") || body.includes("blocked") || cfMitigated.includes("bot") || cfMitigated.includes("block")) {
+            reason = "bot_block";
+        }
+        else if (body.includes("country") && body.includes("restricted")) {
+            reason = "geo_block";
+        }
+        else {
+            reason = "bot_block";
+        }
+    }
+    return {
+        status,
+        reason,
+        provider,
+        fingerprint,
+        headers: {
+            ...(headers["cf-ray"] ? { "cf-ray": headers["cf-ray"] } : {}),
+            ...(headers["cf-mitigated"] ? { "cf-mitigated": headers["cf-mitigated"] } : {}),
+            ...(headers["retry-after"] ? { "retry-after": headers["retry-after"] } : {}),
+            ...(headers["server"] ? { server: headers["server"] } : {}),
+        },
+        snippet,
+        url: error.config?.url,
+        method: (error.config?.method ?? "GET").toUpperCase(),
+    };
+}
 function createCookieJar(existing) {
     if (existing)
         return existing;
@@ -67,6 +162,12 @@ function buildDefaultHeaders(options, ua) {
         "Upgrade-Insecure-Requests": "1",
         Pragma: "no-cache",
         "Cache-Control": "no-cache",
+        "Sec-Fetch-Site": options.origin ? "same-origin" : "none",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Ch-Ua": "\"Not.A/Brand\";v=\"8\", \"Chromium\";v=\"124\", \"Google Chrome\";v=\"124\"",
+        "Sec-Ch-Ua-Mobile": "?0",
+        "Sec-Ch-Ua-Platform": "\"Windows\"",
     };
     if (options.origin) {
         headers["Origin"] = options.origin;
@@ -130,6 +231,15 @@ function createFetcher(options = {}) {
             }
         }
         return config;
+    });
+    client.interceptors.response.use((response) => response, (error) => {
+        if (axios_1.default.isAxiosError(error)) {
+            const diagnostic = analyzeUpstreamError(error);
+            if (diagnostic) {
+                error.upstream = diagnostic;
+            }
+        }
+        return Promise.reject(error);
     });
     return { client, jar };
 }
