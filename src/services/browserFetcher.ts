@@ -1,5 +1,4 @@
 import animeConfig from "@configs/animeConfig";
-import PQueue from "p-queue";
 
 type PlaywrightModule = typeof import("playwright-core");
 type BrowserTypeName = "chromium" | "firefox" | "webkit";
@@ -24,7 +23,7 @@ interface BrowserCacheEntry {
 }
 
 let cachedBrowser: BrowserCacheEntry | null = null;
-const browserQueue = new PQueue({ concurrency: 1 });
+let browserQueue: any;
 
 async function loadPlaywright(): Promise<PlaywrightModule> {
   try {
@@ -67,6 +66,14 @@ function buildExtraHeaders(options: BrowserFetchOptions): Record<string, string>
   return headers;
 }
 
+async function getBrowserQueue(): Promise<any> {
+  if (!browserQueue) {
+    const PQueue = require("p-queue").default;
+    browserQueue = new PQueue({ concurrency: 1 });
+  }
+  return browserQueue;
+}
+
 export async function fetchPageWithBrowser(options: BrowserFetchOptions): Promise<string | undefined> {
   const globalConfig = animeConfig.scraper?.browserFallback;
   if (!globalConfig?.enabled) {
@@ -79,7 +86,8 @@ export async function fetchPageWithBrowser(options: BrowserFetchOptions): Promis
   const timeout = options.timeoutMs ?? globalConfig.navigationTimeoutMs ?? 25_000;
   const userAgent = options.userAgent ?? globalConfig.userAgent;
 
-  const result = (await browserQueue.add(async (): Promise<string | undefined> => {
+  const queue = await getBrowserQueue();
+  const result = (await queue.add(async (): Promise<string | undefined> => {
     const playwright = await loadPlaywright();
     const browser = await ensureBrowser(playwright, provider, headless);
 

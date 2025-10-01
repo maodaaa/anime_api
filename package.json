@@ -37,7 +37,7 @@
     "express": "^4.21.1",
     "http-cookie-agent": "^6.0.3",
     "lru-cache": "^11.0.1",
-    "p-queue": "^7.4.1",
+    "p-queue": "^6.6.2",
     "playwright-core": "^1.45.0",
     "tough-cookie": "^4.1.4"
   }

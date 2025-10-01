@@ -29,9 +29,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.fetchPageWithBrowser = fetchPageWithBrowser;
 exports.shutdownBrowser = shutdownBrowser;
 const animeConfig_1 = __importDefault(require("../configs/animeConfig"));
-const p_queue_1 = __importDefault(require("p-queue"));
 let cachedBrowser = null;
-const browserQueue = new p_queue_1.default({ concurrency: 1 });
+let browserQueue;
 async function loadPlaywright() {
     try {
         return await Promise.resolve().then(() => __importStar(require("playwright-core")));
@@ -62,6 +61,13 @@ function buildExtraHeaders(options) {
     }
     return headers;
 }
+async function getBrowserQueue() {
+    if (!browserQueue) {
+        const PQueue = require("p-queue").default;
+        browserQueue = new PQueue({ concurrency: 1 });
+    }
+    return browserQueue;
+}
 async function fetchPageWithBrowser(options) {
     const globalConfig = animeConfig_1.default.scraper?.browserFallback;
     if (!globalConfig?.enabled) {
@@ -72,7 +78,8 @@ async function fetchPageWithBrowser(options) {
     const waitUntil = options.waitUntil ?? globalConfig.waitUntil ?? "domcontentloaded";
     const timeout = options.timeoutMs ?? globalConfig.navigationTimeoutMs ?? 25_000;
     const userAgent = options.userAgent ?? globalConfig.userAgent;
-    const result = (await browserQueue.add(async () => {
+    const queue = await getBrowserQueue();
+    const result = (await queue.add(async () => {
         const playwright = await loadPlaywright();
         const browser = await ensureBrowser(playwright, provider, headless);
         const context = await browser.newContext({

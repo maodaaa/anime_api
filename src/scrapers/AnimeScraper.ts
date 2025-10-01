@@ -6,7 +6,7 @@ import axios, {
 } from "axios";
 import { load, type CheerioAPI } from "cheerio";
 import path from "path";
-import PQueue from "p-queue";
+// Dynamic import for p-queue will be used in getRequestQueue method
 import animeConfig from "@configs/animeConfig";
 import { setResponseError } from "@helpers/error";
 import {
@@ -73,7 +73,7 @@ export default class AnimeScraper {
   private robotsPromise?: Promise<void>;
   private robotsRules: RobotsRules | null = null;
   private warmupCompleted = false;
-  private requestQueue?: PQueue;
+  private requestQueue?: any;
 
   constructor(baseUrl: string, baseUrlPath: string, httpOptions?: AnimeScraperHttpOptions) {
     this.baseUrl = this.generateBaseUrl(baseUrl);
@@ -125,7 +125,7 @@ export default class AnimeScraper {
     this.label = httpOptions?.label;
   }
 
-  private getRequestQueue(): PQueue | undefined {
+  private async getRequestQueue(): Promise<any | undefined> {
     if (!this.rateLimitOptions) return undefined;
     if (this.requestQueue) return this.requestQueue;
 
@@ -135,14 +135,17 @@ export default class AnimeScraper {
       intervalCap,
     } = this.rateLimitOptions;
 
+    // Import p-queue (CommonJS compatible version)
+    const PQueue = require("p-queue").default;
+
     const queue = new PQueue({
       concurrency: Math.max(1, maxConcurrent),
       ...(intervalMs && intervalMs > 0
         ? {
-            interval: intervalMs,
-            intervalCap: intervalCap ?? Math.max(1, maxConcurrent),
-            carryoverConcurrencyCount: true,
-          }
+          interval: intervalMs,
+          intervalCap: intervalCap ?? Math.max(1, maxConcurrent),
+          carryoverConcurrencyCount: true,
+        }
         : {}),
     });
 
@@ -478,7 +481,7 @@ export default class AnimeScraper {
       return client.request<T>(config);
     };
 
-    const queue = this.getRequestQueue();
+    const queue = await this.getRequestQueue();
     if (queue) {
       const response = await queue.add(executeRequest);
       return response as AxiosResponse<T, any>;

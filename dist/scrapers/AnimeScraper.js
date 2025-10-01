@@ -29,7 +29,6 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const axios_1 = __importStar(require("axios"));
 const cheerio_1 = require("cheerio");
 const path_1 = __importDefault(require("path"));
-const p_queue_1 = __importDefault(require("p-queue"));
 const animeConfig_1 = __importDefault(require("../configs/animeConfig"));
 const error_1 = require("../helpers/error");
 const dataFetcher_1 = require("../services/dataFetcher");
@@ -82,13 +81,14 @@ class AnimeScraper {
         };
         this.label = httpOptions?.label;
     }
-    getRequestQueue() {
+    async getRequestQueue() {
         if (!this.rateLimitOptions)
             return undefined;
         if (this.requestQueue)
             return this.requestQueue;
         const { maxConcurrent = 1, intervalMs, intervalCap, } = this.rateLimitOptions;
-        const queue = new p_queue_1.default({
+        const PQueue = require("p-queue").default;
+        const queue = new PQueue({
             concurrency: Math.max(1, maxConcurrent),
             ...(intervalMs && intervalMs > 0
                 ? {
@@ -389,7 +389,7 @@ class AnimeScraper {
             await this.applyRateLimitDelay();
             return client.request(config);
         };
-        const queue = this.getRequestQueue();
+        const queue = await this.getRequestQueue();
         if (queue) {
             const response = await queue.add(executeRequest);
             return response;

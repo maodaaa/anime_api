@@ -23,7 +23,7 @@ const animeConfig = {
             jitterMs: numFromEnv(process.env.SCRAPER_RATE_LIMIT_JITTER_MS, 350),
         },
         browserFallback: {
-            enabled: boolFromEnv(process.env.SCRAPER_BROWSER_FALLBACK, false),
+            enabled: boolFromEnv(process.env.SCRAPER_BROWSER_FALLBACK, true),
             provider: process.env.SCRAPER_BROWSER_PROVIDER ?? "chromium",
             waitUntil: process.env.SCRAPER_BROWSER_WAIT_UNTIL ?? "domcontentloaded",
             navigationTimeoutMs: numFromEnv(process.env.SCRAPER_BROWSER_TIMEOUT_MS, 25000),
