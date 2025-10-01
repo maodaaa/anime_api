@@ -19,6 +19,7 @@
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
     "@types/node": "^22.8.6",
+    "@types/tough-cookie": "^4.0.5",
     "gulp": "^5.0.0",
     "gulp-csso": "^4.0.1",
     "gulp-html-minifier-terser": "^7.1.0",
@@ -30,9 +31,12 @@
   },
   "dependencies": {
     "axios": "^1.7.6",
+    "axios-retry": "^4.5.0",
     "cheerio": "1.0.0-rc.12",
     "cors": "^2.8.5",
     "express": "^4.21.1",
-    "lru-cache": "^11.0.1"
+    "http-cookie-agent": "^6.0.3",
+    "lru-cache": "^11.0.1",
+    "tough-cookie": "^4.1.4"
   }
 }

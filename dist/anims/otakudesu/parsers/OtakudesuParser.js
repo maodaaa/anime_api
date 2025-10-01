@@ -3,10 +3,23 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-const dataFetcher_1 = require("../../../services/dataFetcher");
 const lruCache_1 = require("../../../libs/lruCache");
 const OtakudesuParserExtra_1 = __importDefault(require("./OtakudesuParserExtra"));
 class OtakudesuParser extends OtakudesuParserExtra_1.default {
+    constructor(baseUrl, baseUrlPath) {
+        const normalizedBase = baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
+        const httpOptions = {
+            origin: normalizedBase,
+            referer: `${normalizedBase}/`,
+            warmupPath: "/",
+            headersExtra: {
+                "Sec-Fetch-Site": "same-origin",
+                "Sec-Fetch-Mode": "navigate",
+                "Sec-Fetch-Dest": "document",
+            },
+        };
+        super(baseUrl, baseUrlPath, httpOptions);
+    }
     parseHome() {
         return this.scrape({
             path: "/",
@@ -313,12 +326,17 @@ class OtakudesuParser extends OtakudesuParserExtra_1.default {
             const serverElements = $(".mirrorstream ul").toArray();
             const nonceCacheKey = "otakudesuNonce";
             if (!lruCache_1.cache.get(nonceCacheKey)) {
-                const nonce = await (0, dataFetcher_1.wajikFetch)(`${this.baseUrl}/wp-admin/admin-ajax.php`, this.baseUrl, {
+                const nonce = await this.request({
+                    url: "/wp-admin/admin-ajax.php",
                     method: "POST",
                     responseType: "json",
                     data: new URLSearchParams({
                         action: this.derawr("ff675Di7Ck7Ehf895hE7hBBi6E7Bk68k"),
                     }),
+                    headers: {
+                        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                        "X-Requested-With": "XMLHttpRequest",
+                    },
                 });
                 if (nonce?.data)
                     lruCache_1.cache.set(nonceCacheKey, nonce.data);
@@ -424,7 +442,8 @@ class OtakudesuParser extends OtakudesuParserExtra_1.default {
         const nonceCacheKey = "otakudesuNonce";
         const serverIdArr = this.derawr(serverId).split("-");
         const getUrlData = async (nonce) => {
-            return await (0, dataFetcher_1.wajikFetch)(`${this.baseUrl}/wp-admin/admin-ajax.php`, this.baseUrl, {
+            return await this.request({
+                url: "/wp-admin/admin-ajax.php",
                 method: "POST",
                 responseType: "json",
                 data: new URLSearchParams({
@@ -434,6 +453,10 @@ class OtakudesuParser extends OtakudesuParserExtra_1.default {
                     action: this.derawr("7f8A5AhE8g558Ai8k9AAikD7gkECBgD9"),
                     nonce: nonce,
                 }),
+                headers: {
+                    "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                    "X-Requested-With": "XMLHttpRequest",
+                },
             });
         };
         const getHtml = (base64) => {
@@ -446,13 +469,19 @@ class OtakudesuParser extends OtakudesuParserExtra_1.default {
             data.url = getUrl(getHtml(url.data));
         }
         catch (error) {
-            if (error.status === 403) {
-                const nonce = await (0, dataFetcher_1.wajikFetch)(`${this.baseUrl}/wp-admin/admin-ajax.php`, this.baseUrl, {
+            const status = error?.status ?? error?.response?.status;
+            if (status === 403) {
+                const nonce = await this.request({
+                    url: "/wp-admin/admin-ajax.php",
                     method: "POST",
                     responseType: "json",
                     data: new URLSearchParams({
                         action: this.derawr("ff675Di7Ck7Ehf895hE7hBBi6E7Bk68k"),
                     }),
+                    headers: {
+                        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                        "X-Requested-With": "XMLHttpRequest",
+                    },
                 });
                 if (nonce?.data) {
                     lruCache_1.cache.set(nonceCacheKey, nonce.data);

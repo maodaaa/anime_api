@@ -1,17 +1,49 @@
-import type { AxiosRequestConfig } from "axios";
+import type { AxiosInstance, AxiosRequestConfig, AxiosResponse } from "axios";
 import { load, type CheerioAPI } from "cheerio";
-import { wajikFetch } from "@services/dataFetcher";
-import animeConfig from "@configs/animeConfig";
 import path from "path";
+import animeConfig from "@configs/animeConfig";
 import { setResponseError } from "@helpers/error";
+import { createFetcher, warmup } from "@services/dataFetcher";
+
+interface RobotsRules {
+  allow: string[];
+  disallow: string[];
+}
+
+export interface AnimeScraperHttpOptions {
+  origin?: string;
+  referer?: string;
+  headersExtra?: Record<string, string>;
+  warmupPath?: string;
+  timeoutMs?: number;
+}
+
+interface RequestOptions {
+  skipRobotsCheck?: boolean;
+}
+
+const { scraper } = animeConfig;
 
 export default class AnimeScraper {
   protected baseUrl: string;
   protected baseUrlPath: string;
 
-  constructor(baseUrl: string, baseUrlPath: string) {
+  private readonly httpOptions: AnimeScraperHttpOptions;
+  private httpClientPromise?: Promise<AxiosInstance>;
+  private robotsPromise?: Promise<void>;
+  private robotsRules: RobotsRules | null = null;
+  private warmupCompleted = false;
+
+  constructor(baseUrl: string, baseUrlPath: string, httpOptions?: AnimeScraperHttpOptions) {
     this.baseUrl = this.generateBaseUrl(baseUrl);
     this.baseUrlPath = this.generateUrlPath([baseUrlPath]);
+    this.httpOptions = {
+      origin: httpOptions?.origin ?? this.baseUrl,
+      referer: httpOptions?.referer ?? `${this.baseUrl}/`,
+      headersExtra: httpOptions?.headersExtra,
+      warmupPath: httpOptions?.warmupPath,
+      timeoutMs: httpOptions?.timeoutMs,
+    };
   }
 
   private deepCopy<T>(obj: T): T {
@@ -74,6 +106,192 @@ export default class AnimeScraper {
     }
 
     return baseUrl;
+  }
+
+  private async getHttpClient(): Promise<AxiosInstance> {
+    if (!this.httpClientPromise) {
+      this.httpClientPromise = (async () => {
+        const { client } = createFetcher({
+          baseURL: this.baseUrl,
+          origin: this.httpOptions.origin,
+          referer: this.httpOptions.referer,
+          headersExtra: this.httpOptions.headersExtra,
+          timeoutMs: this.httpOptions.timeoutMs,
+        });
+
+        if (!this.warmupCompleted && this.httpOptions.warmupPath) {
+          await warmup(client, this.httpOptions.warmupPath);
+          this.warmupCompleted = true;
+        }
+
+        return client;
+      })();
+    }
+
+    return this.httpClientPromise;
+  }
+
+  private shouldRespectRobots(): boolean {
+    return scraper?.respectRobotsTxt !== false;
+  }
+
+  private async ensureRobots(client: AxiosInstance): Promise<void> {
+    if (!this.shouldRespectRobots()) return;
+    if (this.robotsPromise) {
+      await this.robotsPromise;
+      return;
+    }
+
+    this.robotsPromise = (async () => {
+      try {
+        const response = await client.get<string>("/robots.txt", {
+          responseType: "text",
+          transformResponse: (data) => data,
+          headers: {
+            Accept: "text/plain",
+          },
+        });
+
+        if (typeof response.data === "string") {
+          this.robotsRules = this.parseRobots(response.data);
+        }
+      } catch (error) {
+        this.robotsRules = null;
+      }
+    })();
+
+    await this.robotsPromise;
+  }
+
+  private parseRobots(content: string): RobotsRules {
+    const rules: RobotsRules = { allow: [], disallow: [] };
+    const lines = content.split(/\r?\n/);
+    let appliesToAll = false;
+
+    for (const rawLine of lines) {
+      const line = rawLine.split("#")[0]?.trim();
+      if (!line) continue;
+
+      const [directiveRaw, valueRaw = ""] = line.split(":");
+      const directive = directiveRaw.trim().toLowerCase();
+      const value = valueRaw.trim();
+
+      if (directive === "user-agent") {
+        appliesToAll = value === "*";
+        continue;
+      }
+
+      if (!appliesToAll) continue;
+
+      if (directive === "disallow") {
+        if (value) rules.disallow.push(value);
+        continue;
+      }
+
+      if (directive === "allow") {
+        if (value) rules.allow.push(value);
+      }
+    }
+
+    return rules;
+  }
+
+  private matchesRule(pathname: string, rule: string): boolean {
+    if (!rule) return false;
+    try {
+      const pattern = rule
+        .replace(/[.+?^${}()|[\]\\]/g, "\\$&")
+        .replace(/\*/g, ".*");
+      const regex = new RegExp(`^${pattern}`);
+
+      return regex.test(pathname);
+    } catch (error) {
+      return pathname.startsWith(rule);
+    }
+  }
+
+  private isPathAllowed(pathname: string): boolean {
+    if (!this.robotsRules) return true;
+
+    const { allow, disallow } = this.robotsRules;
+
+    const findLongestMatch = (rules: string[]): number => {
+      let longest = -1;
+
+      for (const rule of rules) {
+        if (!rule) continue;
+        if (this.matchesRule(pathname, rule)) {
+          if (rule.length > longest) longest = rule.length;
+        }
+      }
+
+      return longest;
+    };
+
+    const longestDisallow = findLongestMatch(disallow);
+    if (longestDisallow < 0) return true;
+
+    const longestAllow = findLongestMatch(allow);
+
+    return longestAllow >= longestDisallow;
+  }
+
+  private resolveRequestUrl(config: AxiosRequestConfig): string | null {
+    if (config.url?.startsWith("http")) return config.url;
+
+    const base = config.baseURL ?? this.baseUrl;
+    if (!config.url) return base ?? null;
+
+    if (!base) return config.url;
+
+    try {
+      const resolved = new URL(config.url, base.endsWith("/") ? base : `${base}/`);
+      return resolved.toString();
+    } catch (error) {
+      return `${base}${config.url}`;
+    }
+  }
+
+  private async enforceRobots(config: AxiosRequestConfig): Promise<void> {
+    if (!this.shouldRespectRobots()) return;
+
+    const client = await this.getHttpClient();
+    await this.ensureRobots(client);
+
+    if (!this.robotsRules) return;
+
+    const resolvedUrl = this.resolveRequestUrl(config);
+    if (!resolvedUrl) return;
+
+    let pathname = "";
+    try {
+      const parsed = new URL(resolvedUrl);
+      if (parsed.origin !== new URL(this.baseUrl).origin) return;
+      pathname = parsed.pathname || "/";
+    } catch (error) {
+      return;
+    }
+
+    if (!this.isPathAllowed(pathname)) {
+      setResponseError(403, `Akses ke ${pathname} diblokir oleh robots.txt`);
+    }
+  }
+
+  protected async requestRaw<T = any>(
+    config: AxiosRequestConfig,
+    options?: RequestOptions
+  ): Promise<AxiosResponse<T, any>> {
+    if (!options?.skipRobotsCheck) {
+      await this.enforceRobots(config);
+    }
+
+    const client = await this.getHttpClient();
+    return client.request<T>(config);
+  }
+
+  protected async request<T = any>(config: AxiosRequestConfig, options?: RequestOptions): Promise<T> {
+    const response = await this.requestRaw<T>(config, options);
+    return response.data;
   }
 
   protected str(string?: string): string {
@@ -185,12 +403,18 @@ export default class AnimeScraper {
     parser: ($: CheerioAPI, data: T) => Promise<T>
   ): Promise<T> {
     const path = this.generateUrlPath([props.path]);
-    const htmlData = await wajikFetch(this.baseUrl + path, this.baseUrl, {
-      method: "GET",
-      responseType: "text",
-      ...props.axiosConfig,
-    });
-    const $ = load(htmlData);
+    const html = await this.request<string>(
+      {
+        url: path,
+        method: "GET",
+        responseType: "text",
+        transformResponse: (data) => data,
+        ...props.axiosConfig,
+      },
+      { skipRobotsCheck: false }
+    );
+
+    const $ = load(html);
     const data = parser($, this.deepCopy(props.initialData));
 
     return data;

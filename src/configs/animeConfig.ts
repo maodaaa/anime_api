@@ -6,6 +6,10 @@ const animeConfig = {
     samehadaku: "https://v1.samehadaku.how",
   },
 
+  scraper: {
+    respectRobotsTxt: true,
+  },
+
   response: {
     /* ngebalikin respon href biar gampang nyari ref idnya contoh {"href": "/otakudesu/anime/animeId"} value = false akan mengurangi ukuran response <> up to 30% */
     href: true,

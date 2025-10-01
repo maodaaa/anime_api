@@ -3,11 +3,24 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-const dataFetcher_1 = require("../../../services/dataFetcher");
 const error_1 = require("../../../helpers/error");
 const SamehadakuParserExtra_1 = __importDefault(require("./SamehadakuParserExtra"));
 const path_1 = __importDefault(require("path"));
 class SamehadakuParser extends SamehadakuParserExtra_1.default {
+    constructor(baseUrl, baseUrlPath) {
+        const normalizedBase = baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
+        const httpOptions = {
+            origin: normalizedBase,
+            referer: `${normalizedBase}/`,
+            warmupPath: "/",
+            headersExtra: {
+                "Sec-Fetch-Site": "same-origin",
+                "Sec-Fetch-Mode": "navigate",
+                "Sec-Fetch-Dest": "document",
+            },
+        };
+        super(baseUrl, baseUrlPath, httpOptions);
+    }
     parseHome() {
         return this.scrape({
             path: "/",
@@ -313,15 +326,21 @@ class SamehadakuParser extends SamehadakuParserExtra_1.default {
                 const postData = el.attr("data-post");
                 const numeData = el.attr("data-nume");
                 const typeData = el.attr("data-type");
-                const result = await (0, dataFetcher_1.wajikFetch)(`${this.baseUrl}/wp-admin/admin-ajax.php`, this.baseUrl, {
+                const result = await this.request({
+                    url: "/wp-admin/admin-ajax.php",
                     method: "POST",
                     responseType: "text",
+                    transformResponse: (data) => data,
                     data: new URLSearchParams({
                         action: "player_ajax",
                         post: this.str(postData),
                         nume: this.str(numeData),
                         type: this.str(typeData),
                     }),
+                    headers: {
+                        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                        "X-Requested-With": "XMLHttpRequest",
+                    },
                 });
                 return this.generateSrcFromIframeTag(result);
             };
@@ -459,19 +478,26 @@ class SamehadakuParser extends SamehadakuParserExtra_1.default {
         const post = serverIdArr[0];
         const nume = serverIdArr[1];
         const type = serverIdArr[2];
-        const url = await (0, dataFetcher_1.wajikFetch)(`${this.baseUrl}/wp-admin/admin-ajax.php`, this.baseUrl, {
+        const url = await this.request({
+            url: "/wp-admin/admin-ajax.php",
             method: "POST",
             responseType: "text",
+            transformResponse: (data) => data,
             data: new URLSearchParams({
                 action: "player_ajax",
                 post: post || "",
                 nume: nume || "",
                 type: type || "",
             }),
-        }, (response) => {
-            if (!response.data)
-                (0, error_1.setResponseError)(400);
+            headers: {
+                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                "X-Requested-With": "XMLHttpRequest",
+            },
+        }, {
+            skipRobotsCheck: false,
         });
+        if (!url)
+            (0, error_1.setResponseError)(400);
         data.url = this.generateSrcFromIframeTag(url);
         if (data.url.includes("api.wibufile.com")) {
             data.url =
@@ -483,7 +509,12 @@ class SamehadakuParser extends SamehadakuParserExtra_1.default {
         return data;
     }
     parseWibuFile(url) {
-        return (0, dataFetcher_1.wajikFetch)(url, this.baseUrl);
+        return this.request({
+            url,
+            method: "GET",
+            responseType: "text",
+            transformResponse: (data) => data,
+        }, { skipRobotsCheck: true });
     }
     parseAnimeBatch(batchId) {
         return this.scrape({

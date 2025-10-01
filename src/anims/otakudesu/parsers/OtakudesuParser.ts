@@ -1,11 +1,27 @@
 import * as IOP from "./interfaces/IOtakudesuParser";
 import * as IOPE from "./interfaces/IOtakudesuParserExtra";
 import type { Quality, Server, Url } from "@interfaces/IGlobal";
-import { wajikFetch } from "@services/dataFetcher";
 import { cache } from "@libs/lruCache";
 import OtakudesuParserExtra from "./OtakudesuParserExtra";
+import type { AnimeScraperHttpOptions } from "@scrapers/AnimeScraper";
 
 export default class OtakudesuParser extends OtakudesuParserExtra {
+  constructor(baseUrl: string, baseUrlPath: string) {
+    const normalizedBase = baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
+    const httpOptions: AnimeScraperHttpOptions = {
+      origin: normalizedBase,
+      referer: `${normalizedBase}/`,
+      warmupPath: "/",
+      headersExtra: {
+        "Sec-Fetch-Site": "same-origin",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Dest": "document",
+      },
+    };
+
+    super(baseUrl, baseUrlPath, httpOptions);
+  }
+
   parseHome(): Promise<IOP.Home> {
     return this.scrape<IOP.Home>(
       {
@@ -422,13 +438,17 @@ export default class OtakudesuParser extends OtakudesuParserExtra {
         const nonceCacheKey = "otakudesuNonce";
 
         if (!cache.get(nonceCacheKey)) {
-          // MISS
-          const nonce = await wajikFetch(`${this.baseUrl}/wp-admin/admin-ajax.php`, this.baseUrl, {
+          const nonce = await this.request<any>({
+            url: "/wp-admin/admin-ajax.php",
             method: "POST",
             responseType: "json",
             data: new URLSearchParams({
               action: this.derawr("ff675Di7Ck7Ehf895hE7hBBi6E7Bk68k"),
             }),
+            headers: {
+              "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+              "X-Requested-With": "XMLHttpRequest",
+            },
           });
 
           if (nonce?.data) cache.set(nonceCacheKey, nonce.data);
@@ -559,7 +579,8 @@ export default class OtakudesuParser extends OtakudesuParserExtra {
     const serverIdArr = this.derawr(serverId).split("-");
 
     const getUrlData = async (nonce: any) => {
-      return await wajikFetch(`${this.baseUrl}/wp-admin/admin-ajax.php`, this.baseUrl, {
+      return await this.request<any>({
+        url: "/wp-admin/admin-ajax.php",
         method: "POST",
         responseType: "json",
         data: new URLSearchParams({
@@ -569,6 +590,10 @@ export default class OtakudesuParser extends OtakudesuParserExtra {
           action: this.derawr("7f8A5AhE8g558Ai8k9AAikD7gkECBgD9"),
           nonce: nonce,
         }),
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+          "X-Requested-With": "XMLHttpRequest",
+        },
       });
     };
 
@@ -585,14 +610,19 @@ export default class OtakudesuParser extends OtakudesuParserExtra {
 
       data.url = getUrl(getHtml(url.data));
     } catch (error: any) {
-      if (error.status === 403) {
-        // MISS
-        const nonce = await wajikFetch(`${this.baseUrl}/wp-admin/admin-ajax.php`, this.baseUrl, {
+      const status = error?.status ?? error?.response?.status;
+      if (status === 403) {
+        const nonce = await this.request<any>({
+          url: "/wp-admin/admin-ajax.php",
           method: "POST",
           responseType: "json",
           data: new URLSearchParams({
             action: this.derawr("ff675Di7Ck7Ehf895hE7hBBi6E7Bk68k"),
           }),
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+            "X-Requested-With": "XMLHttpRequest",
+          },
         });
 
         if (nonce?.data) {

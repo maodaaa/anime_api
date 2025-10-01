@@ -1,12 +1,28 @@
 import * as ISP from "./interfaces/ISamehadakuParser";
 import * as ISPE from "./interfaces/ISamehadakuParserExtra";
 import type { Server } from "@interfaces/IGlobal";
-import { wajikFetch } from "@services/dataFetcher";
 import { setResponseError } from "@helpers/error";
 import SamehadakuParserExtra from "./SamehadakuParserExtra";
 import path from "path";
+import type { AnimeScraperHttpOptions } from "@scrapers/AnimeScraper";
 
 export default class SamehadakuParser extends SamehadakuParserExtra {
+  constructor(baseUrl: string, baseUrlPath: string) {
+    const normalizedBase = baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
+    const httpOptions: AnimeScraperHttpOptions = {
+      origin: normalizedBase,
+      referer: `${normalizedBase}/`,
+      warmupPath: "/",
+      headersExtra: {
+        "Sec-Fetch-Site": "same-origin",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Dest": "document",
+      },
+    };
+
+    super(baseUrl, baseUrlPath, httpOptions);
+  }
+
   parseHome(): Promise<ISP.Home> {
     return this.scrape<ISP.Home>(
       {
@@ -433,15 +449,21 @@ export default class SamehadakuParser extends SamehadakuParserExtra {
           const numeData = el.attr("data-nume");
           const typeData = el.attr("data-type");
 
-          const result = await wajikFetch(`${this.baseUrl}/wp-admin/admin-ajax.php`, this.baseUrl, {
+          const result = await this.request<string>({
+            url: "/wp-admin/admin-ajax.php",
             method: "POST",
             responseType: "text",
+            transformResponse: (data) => data,
             data: new URLSearchParams({
               action: "player_ajax",
               post: this.str(postData),
               nume: this.str(numeData),
               type: this.str(typeData),
             }),
+            headers: {
+              "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+              "X-Requested-With": "XMLHttpRequest",
+            },
           });
 
           return this.generateSrcFromIframeTag(result);
@@ -618,23 +640,29 @@ export default class SamehadakuParser extends SamehadakuParserExtra {
     const nume = serverIdArr[1];
     const type = serverIdArr[2];
 
-    const url = await wajikFetch(
-      `${this.baseUrl}/wp-admin/admin-ajax.php`,
-      this.baseUrl,
+    const url = await this.request<string>(
       {
+        url: "/wp-admin/admin-ajax.php",
         method: "POST",
         responseType: "text",
+        transformResponse: (data) => data,
         data: new URLSearchParams({
           action: "player_ajax",
           post: post || "",
           nume: nume || "",
           type: type || "",
         }),
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+          "X-Requested-With": "XMLHttpRequest",
+        },
       },
-      (response) => {
-        if (!response.data) setResponseError(400);
+      {
+        skipRobotsCheck: false,
       }
     );
+
+    if (!url) setResponseError(400);
 
     data.url = this.generateSrcFromIframeTag(url);
 
@@ -652,7 +680,15 @@ export default class SamehadakuParser extends SamehadakuParserExtra {
   }
 
   parseWibuFile(url: string): Promise<any> {
-    return wajikFetch(url, this.baseUrl);
+    return this.request<string>(
+      {
+        url,
+        method: "GET",
+        responseType: "text",
+        transformResponse: (data) => data,
+      },
+      { skipRobotsCheck: true }
+    );
   }
 
   parseAnimeBatch(batchId: string): Promise<ISP.AnimeBatch> {

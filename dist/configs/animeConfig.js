@@ -6,6 +6,9 @@ const animeConfig = {
         otakudesu: "https://otakudesu.best",
         samehadaku: "https://v1.samehadaku.how",
     },
+    scraper: {
+        respectRobotsTxt: true,
+    },
     response: {
         href: true,
         sourceUrl: true,

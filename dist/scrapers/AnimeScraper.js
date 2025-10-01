@@ -4,14 +4,24 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const cheerio_1 = require("cheerio");
-const dataFetcher_1 = require("../services/dataFetcher");
-const animeConfig_1 = __importDefault(require("../configs/animeConfig"));
 const path_1 = __importDefault(require("path"));
+const animeConfig_1 = __importDefault(require("../configs/animeConfig"));
 const error_1 = require("../helpers/error");
+const dataFetcher_1 = require("../services/dataFetcher");
+const { scraper } = animeConfig_1.default;
 class AnimeScraper {
-    constructor(baseUrl, baseUrlPath) {
+    constructor(baseUrl, baseUrlPath, httpOptions) {
+        this.robotsRules = null;
+        this.warmupCompleted = false;
         this.baseUrl = this.generateBaseUrl(baseUrl);
         this.baseUrlPath = this.generateUrlPath([baseUrlPath]);
+        this.httpOptions = {
+            origin: httpOptions?.origin ?? this.baseUrl,
+            referer: httpOptions?.referer ?? `${this.baseUrl}/`,
+            headersExtra: httpOptions?.headersExtra,
+            warmupPath: httpOptions?.warmupPath,
+            timeoutMs: httpOptions?.timeoutMs,
+        };
     }
     deepCopy(obj) {
         if (obj === null || typeof obj !== "object")
@@ -64,6 +74,170 @@ class AnimeScraper {
             }
         }
         return baseUrl;
+    }
+    async getHttpClient() {
+        if (!this.httpClientPromise) {
+            this.httpClientPromise = (async () => {
+                const { client } = (0, dataFetcher_1.createFetcher)({
+                    baseURL: this.baseUrl,
+                    origin: this.httpOptions.origin,
+                    referer: this.httpOptions.referer,
+                    headersExtra: this.httpOptions.headersExtra,
+                    timeoutMs: this.httpOptions.timeoutMs,
+                });
+                if (!this.warmupCompleted && this.httpOptions.warmupPath) {
+                    await (0, dataFetcher_1.warmup)(client, this.httpOptions.warmupPath);
+                    this.warmupCompleted = true;
+                }
+                return client;
+            })();
+        }
+        return this.httpClientPromise;
+    }
+    shouldRespectRobots() {
+        return scraper?.respectRobotsTxt !== false;
+    }
+    async ensureRobots(client) {
+        if (!this.shouldRespectRobots())
+            return;
+        if (this.robotsPromise) {
+            await this.robotsPromise;
+            return;
+        }
+        this.robotsPromise = (async () => {
+            try {
+                const response = await client.get("/robots.txt", {
+                    responseType: "text",
+                    transformResponse: (data) => data,
+                    headers: {
+                        Accept: "text/plain",
+                    },
+                });
+                if (typeof response.data === "string") {
+                    this.robotsRules = this.parseRobots(response.data);
+                }
+            }
+            catch (error) {
+                this.robotsRules = null;
+            }
+        })();
+        await this.robotsPromise;
+    }
+    parseRobots(content) {
+        const rules = { allow: [], disallow: [] };
+        const lines = content.split(/\r?\n/);
+        let appliesToAll = false;
+        for (const rawLine of lines) {
+            const line = rawLine.split("#")[0]?.trim();
+            if (!line)
+                continue;
+            const [directiveRaw, valueRaw = ""] = line.split(":");
+            const directive = directiveRaw.trim().toLowerCase();
+            const value = valueRaw.trim();
+            if (directive === "user-agent") {
+                appliesToAll = value === "*";
+                continue;
+            }
+            if (!appliesToAll)
+                continue;
+            if (directive === "disallow") {
+                if (value)
+                    rules.disallow.push(value);
+                continue;
+            }
+            if (directive === "allow") {
+                if (value)
+                    rules.allow.push(value);
+            }
+        }
+        return rules;
+    }
+    matchesRule(pathname, rule) {
+        if (!rule)
+            return false;
+        try {
+            const pattern = rule
+                .replace(/[.+?^${}()|[\]\\]/g, "\\$&")
+                .replace(/\*/g, ".*");
+            const regex = new RegExp(`^${pattern}`);
+            return regex.test(pathname);
+        }
+        catch (error) {
+            return pathname.startsWith(rule);
+        }
+    }
+    isPathAllowed(pathname) {
+        if (!this.robotsRules)
+            return true;
+        const { allow, disallow } = this.robotsRules;
+        const findLongestMatch = (rules) => {
+            let longest = -1;
+            for (const rule of rules) {
+                if (!rule)
+                    continue;
+                if (this.matchesRule(pathname, rule)) {
+                    if (rule.length > longest)
+                        longest = rule.length;
+                }
+            }
+            return longest;
+        };
+        const longestDisallow = findLongestMatch(disallow);
+        if (longestDisallow < 0)
+            return true;
+        const longestAllow = findLongestMatch(allow);
+        return longestAllow >= longestDisallow;
+    }
+    resolveRequestUrl(config) {
+        if (config.url?.startsWith("http"))
+            return config.url;
+        const base = config.baseURL ?? this.baseUrl;
+        if (!config.url)
+            return base ?? null;
+        if (!base)
+            return config.url;
+        try {
+            const resolved = new URL(config.url, base.endsWith("/") ? base : `${base}/`);
+            return resolved.toString();
+        }
+        catch (error) {
+            return `${base}${config.url}`;
+        }
+    }
+    async enforceRobots(config) {
+        if (!this.shouldRespectRobots())
+            return;
+        const client = await this.getHttpClient();
+        await this.ensureRobots(client);
+        if (!this.robotsRules)
+            return;
+        const resolvedUrl = this.resolveRequestUrl(config);
+        if (!resolvedUrl)
+            return;
+        let pathname = "";
+        try {
+            const parsed = new URL(resolvedUrl);
+            if (parsed.origin !== new URL(this.baseUrl).origin)
+                return;
+            pathname = parsed.pathname || "/";
+        }
+        catch (error) {
+            return;
+        }
+        if (!this.isPathAllowed(pathname)) {
+            (0, error_1.setResponseError)(403, `Akses ke ${pathname} diblokir oleh robots.txt`);
+        }
+    }
+    async requestRaw(config, options) {
+        if (!options?.skipRobotsCheck) {
+            await this.enforceRobots(config);
+        }
+        const client = await this.getHttpClient();
+        return client.request(config);
+    }
+    async request(config, options) {
+        const response = await this.requestRaw(config, options);
+        return response.data;
     }
     str(string) {
         return string?.trim() || "";
@@ -149,12 +323,14 @@ class AnimeScraper {
     }
     async scrape(props, parser) {
         const path = this.generateUrlPath([props.path]);
-        const htmlData = await (0, dataFetcher_1.wajikFetch)(this.baseUrl + path, this.baseUrl, {
+        const html = await this.request({
+            url: path,
             method: "GET",
             responseType: "text",
+            transformResponse: (data) => data,
             ...props.axiosConfig,
-        });
-        const $ = (0, cheerio_1.load)(htmlData);
+        }, { skipRobotsCheck: false });
+        const $ = (0, cheerio_1.load)(html);
         const data = parser($, this.deepCopy(props.initialData));
         return data;
     }
