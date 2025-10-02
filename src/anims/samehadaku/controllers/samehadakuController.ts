@@ -1,223 +1,171 @@
-import type { NextFunction, Request, Response } from "express";
+import type { Context } from "hono";
 import { getOrderParam, getPageParam, getQParam, getUrlParam } from "@helpers/queryParams";
 import SamehadakuParser from "@samehadaku/parsers/SamehadakuParser";
 import samehadakuInfo from "@samehadaku/info/samehadakuInfo";
 import generatePayload from "@helpers/payload";
-import path from "path";
+import { fileURLToPath } from "url";
+import { readFile } from "fs/promises";
 
 const { baseUrl, baseUrlPath } = samehadakuInfo;
 const parser = new SamehadakuParser(baseUrl, baseUrlPath);
+const viewsBaseUrl = new URL("../../../../public/views/", import.meta.url);
+
+async function renderView(c: Context, fileName: string) {
+  const filePath = fileURLToPath(new URL(fileName, viewsBaseUrl));
+  const html = await readFile(filePath, "utf-8");
+
+  return c.html(html);
+}
+
+function resolveOrigin(c: Context): string {
+  const forwardedProto = c.req.header("x-forwarded-proto");
+  const forwardedHost = c.req.header("x-forwarded-host");
+  const host = c.req.header("host");
+
+  try {
+    const requestUrl = new URL(c.req.url);
+    const protocol = forwardedProto || requestUrl.protocol.replace(/:\s*$/, "");
+    const finalHost = forwardedHost || host || requestUrl.host;
+
+    return `${protocol}://${finalHost}`;
+  } catch (error) {
+    const protocol = forwardedProto || "http";
+    const finalHost = forwardedHost || host || "localhost";
+
+    return `${protocol}://${finalHost}`;
+  }
+}
 
 const samehadakuController = {
-  getMainView(req: Request, res: Response, next: NextFunction): void {
-    try {
-      const getViewFile = (filePath: string) => {
-        return path.join(__dirname, "..", "..", "..", "public", "views", filePath);
-      };
-
-      res.sendFile(getViewFile("anime-source.html"));
-    } catch (error) {
-      next(error);
-    }
+  getMainView(c: Context) {
+    return renderView(c, "anime-source.html");
   },
 
-  getMainViewData(req: Request, res: Response, next: NextFunction): void {
-    try {
-      const data = samehadakuInfo;
+  getMainViewData(c: Context) {
+    const data = samehadakuInfo;
 
-      res.json(generatePayload(res, { data }));
-    } catch (error) {
-      next(error);
-    }
+    return c.json(generatePayload(200, { data }));
   },
 
-  async getHome(req: Request, res: Response, next: NextFunction): Promise<void> {
-    try {
-      const data = await parser.parseHome();
+  async getHome(c: Context) {
+    const data = await parser.parseHome();
 
-      res.json(generatePayload(res, { data }));
-    } catch (error) {
-      next(error);
-    }
+    return c.json(generatePayload(200, { data }));
   },
 
-  async getAllGenres(req: Request, res: Response, next: NextFunction): Promise<void> {
-    try {
-      const data = await parser.parseAllGenres();
+  async getAllGenres(c: Context) {
+    const data = await parser.parseAllGenres();
 
-      res.json(generatePayload(res, { data }));
-    } catch (error) {
-      next(error);
-    }
+    return c.json(generatePayload(200, { data }));
   },
 
-  async getAllAnimes(req: Request, res: Response, next: NextFunction): Promise<void> {
-    try {
-      const data = await parser.parseAllAnimes();
+  async getAllAnimes(c: Context) {
+    const data = await parser.parseAllAnimes();
 
-      res.json(generatePayload(res, { data }));
-    } catch (error) {
-      next(error);
-    }
+    return c.json(generatePayload(200, { data }));
   },
 
-  async getSchedule(req: Request, res: Response, next: NextFunction): Promise<void> {
-    try {
-      const data = await parser.parseSchedule();
+  async getSchedule(c: Context) {
+    const data = await parser.parseSchedule();
 
-      res.json(generatePayload(res, { data }));
-    } catch (error) {
-      next(error);
-    }
+    return c.json(generatePayload(200, { data }));
   },
 
-  async getRecentEpisodes(req: Request, res: Response, next: NextFunction): Promise<void> {
-    try {
-      const page = getPageParam(req);
-      const { data, pagination } = await parser.parseRecentAnime(page);
+  async getRecentEpisodes(c: Context) {
+    const page = getPageParam(c);
+    const { data, pagination } = await parser.parseRecentAnime(page);
 
-      res.json(generatePayload(res, { data, pagination }));
-    } catch (error) {
-      next(error);
-    }
+    return c.json(generatePayload(200, { data, pagination }));
   },
 
-  async getOngoingAnimes(req: Request, res: Response, next: NextFunction): Promise<void> {
-    try {
-      const page = getPageParam(req);
-      const order = getOrderParam(req);
-      const { data, pagination } = await parser.parseOngoingAnimes(page, order);
+  async getOngoingAnimes(c: Context) {
+    const page = getPageParam(c);
+    const order = getOrderParam(c);
+    const { data, pagination } = await parser.parseOngoingAnimes(page, order);
 
-      res.json(generatePayload(res, { data, pagination }));
-    } catch (error) {
-      next(error);
-    }
+    return c.json(generatePayload(200, { data, pagination }));
   },
 
-  async getCompletedAnimes(req: Request, res: Response, next: NextFunction): Promise<void> {
-    try {
-      const page = getPageParam(req);
-      const order = getOrderParam(req);
-      const { data, pagination } = await parser.parseCompletedAnimes(page, order);
+  async getCompletedAnimes(c: Context) {
+    const page = getPageParam(c);
+    const order = getOrderParam(c);
+    const { data, pagination } = await parser.parseCompletedAnimes(page, order);
 
-      res.json(generatePayload(res, { data, pagination }));
-    } catch (error) {
-      next(error);
-    }
+    return c.json(generatePayload(200, { data, pagination }));
   },
 
-  async getPopularAnimes(req: Request, res: Response, next: NextFunction): Promise<void> {
-    try {
-      const page = getPageParam(req);
-      const { data, pagination } = await parser.parsePopularAnimes(page);
+  async getPopularAnimes(c: Context) {
+    const page = getPageParam(c);
+    const { data, pagination } = await parser.parsePopularAnimes(page);
 
-      res.json(generatePayload(res, { data, pagination }));
-    } catch (error) {
-      next(error);
-    }
+    return c.json(generatePayload(200, { data, pagination }));
   },
 
-  async getMovies(req: Request, res: Response, next: NextFunction): Promise<void> {
-    try {
-      const page = getPageParam(req);
-      const { data, pagination } = await parser.parseMovies(page);
+  async getMovies(c: Context) {
+    const page = getPageParam(c);
+    const { data, pagination } = await parser.parseMovies(page);
 
-      res.json(generatePayload(res, { data, pagination }));
-    } catch (error) {
-      next(error);
-    }
+    return c.json(generatePayload(200, { data, pagination }));
   },
 
-  async getBatches(req: Request, res: Response, next: NextFunction): Promise<void> {
-    try {
-      const page = getPageParam(req);
-      const { data, pagination } = await parser.parseBatches(page);
+  async getBatches(c: Context) {
+    const page = getPageParam(c);
+    const { data, pagination } = await parser.parseBatches(page);
 
-      res.json(generatePayload(res, { data, pagination }));
-    } catch (error) {
-      next(error);
-    }
+    return c.json(generatePayload(200, { data, pagination }));
   },
 
-  async getSearch(req: Request, res: Response, next: NextFunction): Promise<void> {
-    try {
-      const q = getQParam(req);
-      const page = getPageParam(req);
-      const { data, pagination } = await parser.parseSearch(q, page);
+  async getSearch(c: Context) {
+    const q = getQParam(c);
+    const page = getPageParam(c);
+    const { data, pagination } = await parser.parseSearch(q, page);
 
-      res.json(generatePayload(res, { data, pagination }));
-    } catch (error) {
-      next(error);
-    }
+    return c.json(generatePayload(200, { data, pagination }));
   },
 
-  async getGenreAnimes(req: Request, res: Response, next: NextFunction): Promise<void> {
-    try {
-      const { genreId } = req.params;
-      const page = getPageParam(req);
-      const { data, pagination } = await parser.parseGenreAnimes(genreId, page);
+  async getGenreAnimes(c: Context) {
+    const genreId = c.req.param("genreId");
+    const page = getPageParam(c);
+    const { data, pagination } = await parser.parseGenreAnimes(genreId, page);
 
-      res.json(generatePayload(res, { data, pagination }));
-    } catch (error) {
-      next(error);
-    }
+    return c.json(generatePayload(200, { data, pagination }));
   },
 
-  async getAnimeDetails(req: Request, res: Response, next: NextFunction): Promise<void> {
-    try {
-      const { animeId } = req.params;
-      const data = await parser.parseAnimeDetails(animeId);
+  async getAnimeDetails(c: Context) {
+    const animeId = c.req.param("animeId");
+    const data = await parser.parseAnimeDetails(animeId);
 
-      res.json(generatePayload(res, { data }));
-    } catch (error) {
-      next(error);
-    }
+    return c.json(generatePayload(200, { data }));
   },
 
-  async getAnimeEpisode(req: Request, res: Response, next: NextFunction): Promise<void> {
-    try {
-      const { episodeId } = req.params;
-      const originUrl = `${req.headers["x-forwarded-proto"] || req.protocol}://${req.get("host")}`;
-      const data = await parser.parseAnimeEpisode(episodeId, originUrl);
+  async getAnimeEpisode(c: Context) {
+    const episodeId = c.req.param("episodeId");
+    const originUrl = resolveOrigin(c);
+    const data = await parser.parseAnimeEpisode(episodeId, originUrl);
 
-      res.json(generatePayload(res, { data }));
-    } catch (error) {
-      next(error);
-    }
+    return c.json(generatePayload(200, { data }));
   },
 
-  async getServerUrl(req: Request, res: Response, next: NextFunction): Promise<void> {
-    try {
-      const { serverId } = req.params;
-      const originUrl = `${req.headers["x-forwarded-proto"] || req.protocol}://${req.get("host")}`;
-      const data = await parser.parseServerUrl(serverId, originUrl);
+  async getServerUrl(c: Context) {
+    const serverId = c.req.param("serverId");
+    const originUrl = resolveOrigin(c);
+    const data = await parser.parseServerUrl(serverId, originUrl);
 
-      res.json(generatePayload(res, { data }));
-    } catch (error) {
-      next(error);
-    }
+    return c.json(generatePayload(200, { data }));
   },
 
-  async getAnimeBatch(req: Request, res: Response, next: NextFunction): Promise<void> {
-    try {
-      const { batchId } = req.params;
-      const data = await parser.parseAnimeBatch(batchId);
+  async getAnimeBatch(c: Context) {
+    const batchId = c.req.param("batchId");
+    const data = await parser.parseAnimeBatch(batchId);
 
-      res.json(generatePayload(res, { data }));
-    } catch (error) {
-      next(error);
-    }
+    return c.json(generatePayload(200, { data }));
   },
 
-  async getWibuFile(req: Request, res: Response, next: NextFunction): Promise<void> {
-    try {
-      const url = getUrlParam(req);
-      const wibuFile = await parser.parseWibuFile(url);
+  async getWibuFile(c: Context) {
+    const url = getUrlParam(c);
+    const wibuFile = await parser.parseWibuFile(url);
 
-      res.send(wibuFile);
-    } catch (error) {
-      next(error);
-    }
+    return c.text(wibuFile);
   },
 };
 

@@ -1,12 +1,12 @@
-import type { Request } from "express";
+import type { Context } from "hono";
 import { setResponseError } from "./error";
 
 function setErrorMessage(key: string, validValue: string[]): string {
   return `masukkan query parameter: ?${key}=${validValue.join("|")}`;
 }
 
-export function getOrderParam(req: Request): string {
-  const order = req.query.order;
+export function getOrderParam(c: Context): string {
+  const order = c.req.query("order");
   const orders = ["title", "title-reverse", "update", "latest", "popular"];
 
   if (typeof order === "string") {
@@ -22,8 +22,9 @@ export function getOrderParam(req: Request): string {
   return "title";
 }
 
-export function getPageParam(req: Request): number {
-  const page = Number(req.query.page) || 1;
+export function getPageParam(c: Context): number {
+  const pageParam = c.req.query("page");
+  const page = Number(pageParam) || 1;
   const error = {
     status: 400,
     message: setErrorMessage("page", ["number +"]),
@@ -31,15 +32,15 @@ export function getPageParam(req: Request): number {
 
   if (page < 1) setResponseError(error.status, error.message);
 
-  if (isNaN(Number(req.query.page)) && req.query.page !== undefined) {
+  if (isNaN(Number(pageParam)) && pageParam !== undefined) {
     setResponseError(error.status, error.message);
   }
 
   return page;
 }
 
-export function getQParam(req: Request): string {
-  const q = req.query.q;
+export function getQParam(c: Context): string {
+  const q = c.req.query("q");
 
   if (q === undefined) {
     setResponseError(400, setErrorMessage("q", ["string"]));
@@ -50,8 +51,8 @@ export function getQParam(req: Request): string {
   return "";
 }
 
-export function getUrlParam(req: Request): string {
-  const url = req.query.url;
+export function getUrlParam(c: Context): string {
+  const url = c.req.query("url");
 
   if (!url) {
     setResponseError(400, setErrorMessage("url", ["string"]));

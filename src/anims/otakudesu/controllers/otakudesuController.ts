@@ -1,163 +1,112 @@
-import type { NextFunction, Request, Response } from "express";
+import type { Context } from "hono";
 import { getPageParam, getQParam } from "@helpers/queryParams";
 import OtakudesuParser from "@otakudesu/parsers/OtakudesuParser";
 import otakudesuInfo from "@otakudesu/info/otakudesuInfo";
 import generatePayload from "@helpers/payload";
-import path from "path";
+import { fileURLToPath } from "url";
+import { readFile } from "fs/promises";
 
 const { baseUrl, baseUrlPath } = otakudesuInfo;
 const parser = new OtakudesuParser(baseUrl, baseUrlPath);
+const viewsBaseUrl = new URL("../../../../public/views/", import.meta.url);
+
+async function renderView(c: Context, fileName: string) {
+  const filePath = fileURLToPath(new URL(fileName, viewsBaseUrl));
+  const html = await readFile(filePath, "utf-8");
+
+  return c.html(html);
+}
 
 const otakudesuController = {
-  getMainView(req: Request, res: Response, next: NextFunction): void {
-    try {
-      const getViewFile = (filePath: string) => {
-        return path.join(__dirname, "..", "..", "..", "public", "views", filePath);
-      };
-
-      res.sendFile(getViewFile("anime-source.html"));
-    } catch (error) {
-      next(error);
-    }
+  getMainView(c: Context) {
+    return renderView(c, "anime-source.html");
   },
 
-  getMainViewData(req: Request, res: Response, next: NextFunction): void {
-    try {
-      const data = otakudesuInfo;
+  getMainViewData(c: Context) {
+    const data = otakudesuInfo;
 
-      res.json(generatePayload(res, { data }));
-    } catch (error) {
-      next(error);
-    }
+    return c.json(generatePayload(200, { data }));
   },
 
-  async getHome(req: Request, res: Response, next: NextFunction): Promise<void> {
-    try {
-      const data = await parser.parseHome();
+  async getHome(c: Context) {
+    const data = await parser.parseHome();
 
-      res.json(generatePayload(res, { data }));
-    } catch (error) {
-      next(error);
-    }
+    return c.json(generatePayload(200, { data }));
   },
 
-  async getSchedule(req: Request, res: Response, next: NextFunction): Promise<void> {
-    try {
-      const data = await parser.parseSchedule();
+  async getSchedule(c: Context) {
+    const data = await parser.parseSchedule();
 
-      res.json(generatePayload(res, { data }));
-    } catch (error) {
-      next(error);
-    }
+    return c.json(generatePayload(200, { data }));
   },
 
-  async getAllAnimes(req: Request, res: Response, next: NextFunction): Promise<void> {
-    try {
-      const data = await parser.parseAllAnimes();
+  async getAllAnimes(c: Context) {
+    const data = await parser.parseAllAnimes();
 
-      res.json(generatePayload(res, { data }));
-    } catch (error) {
-      next(error);
-    }
+    return c.json(generatePayload(200, { data }));
   },
 
-  async getAllGenres(req: Request, res: Response, next: NextFunction): Promise<void> {
-    try {
-      const data = await parser.parseAllGenres();
+  async getAllGenres(c: Context) {
+    const data = await parser.parseAllGenres();
 
-      res.json(generatePayload(res, { data }));
-    } catch (error) {
-      next(error);
-    }
+    return c.json(generatePayload(200, { data }));
   },
 
-  async getOngoingAnimes(req: Request, res: Response, next: NextFunction): Promise<void> {
-    try {
-      const page = getPageParam(req);
-      const { data, pagination } = await parser.parseOngoingAnimes(page);
+  async getOngoingAnimes(c: Context) {
+    const page = getPageParam(c);
+    const { data, pagination } = await parser.parseOngoingAnimes(page);
 
-      res.json(generatePayload(res, { data, pagination }));
-    } catch (error) {
-      next(error);
-    }
+    return c.json(generatePayload(200, { data, pagination }));
   },
 
-  async getCompletedAnimes(req: Request, res: Response, next: NextFunction): Promise<void> {
-    try {
-      const page = getPageParam(req);
-      const { data, pagination } = await parser.parseCompletedAnimes(page);
+  async getCompletedAnimes(c: Context) {
+    const page = getPageParam(c);
+    const { data, pagination } = await parser.parseCompletedAnimes(page);
 
-      res.json(generatePayload(res, { data, pagination }));
-    } catch (error) {
-      next(error);
-    }
+    return c.json(generatePayload(200, { data, pagination }));
   },
 
-  async getSearch(req: Request, res: Response, next: NextFunction): Promise<void> {
-    try {
-      const q = getQParam(req);
-      const data = await parser.parseSearch(q);
+  async getSearch(c: Context) {
+    const q = getQParam(c);
+    const data = await parser.parseSearch(q);
 
-      res.json(generatePayload(res, { data }));
-    } catch (error) {
-      next(error);
-    }
+    return c.json(generatePayload(200, { data }));
   },
 
-  async getGenreAnimes(req: Request, res: Response, next: NextFunction): Promise<void> {
-    try {
-      const page = getPageParam(req);
-      const { genreId } = req.params;
-      const { data, pagination } = await parser.parseGenreAnimes(genreId, page);
+  async getGenreAnimes(c: Context) {
+    const page = getPageParam(c);
+    const genreId = c.req.param("genreId");
+    const { data, pagination } = await parser.parseGenreAnimes(genreId, page);
 
-      res.json(generatePayload(res, { data, pagination }));
-    } catch (error) {
-      next(error);
-    }
+    return c.json(generatePayload(200, { data, pagination }));
   },
 
-  async getAnimeDetails(req: Request, res: Response, next: NextFunction): Promise<void> {
-    try {
-      const { animeId } = req.params;
-      const data = await parser.parseAnimeDetails(animeId);
+  async getAnimeDetails(c: Context) {
+    const animeId = c.req.param("animeId");
+    const data = await parser.parseAnimeDetails(animeId);
 
-      res.json(generatePayload(res, { data }));
-    } catch (error) {
-      next(error);
-    }
+    return c.json(generatePayload(200, { data }));
   },
 
-  async getAnimeEpisode(req: Request, res: Response, next: NextFunction): Promise<void> {
-    try {
-      const { episodeId } = req.params;
-      const data = await parser.parseAnimeEpisode(episodeId);
+  async getAnimeEpisode(c: Context) {
+    const episodeId = c.req.param("episodeId");
+    const data = await parser.parseAnimeEpisode(episodeId);
 
-      res.json(generatePayload(res, { data }));
-    } catch (error) {
-      next(error);
-    }
+    return c.json(generatePayload(200, { data }));
   },
 
-  async getServerUrl(req: Request, res: Response, next: NextFunction): Promise<void> {
-    try {
-      const { serverId } = req.params;
-      const data = await parser.parseServerUrl(serverId);
+  async getServerUrl(c: Context) {
+    const serverId = c.req.param("serverId");
+    const data = await parser.parseServerUrl(serverId);
 
-      res.json(generatePayload(res, { data }));
-    } catch (error) {
-      next(error);
-    }
+    return c.json(generatePayload(200, { data }));
   },
 
-  async getAnimeBatch(req: Request, res: Response, next: NextFunction): Promise<void> {
-    try {
-      const { batchId } = req.params;
-      const data = await parser.parseAnimeBatch(batchId);
+  async getAnimeBatch(c: Context) {
+    const batchId = c.req.param("batchId");
+    const data = await parser.parseAnimeBatch(batchId);
 
-      res.json(generatePayload(res, { data }));
-    } catch (error) {
-      next(error);
-    }
+    return c.json(generatePayload(200, { data }));
   },
 };
 

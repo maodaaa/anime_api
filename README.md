@@ -14,7 +14,7 @@ MOHON IZIN ABANG SUMBER, sumber bisa bertambah, req/dm rekomendasi situs yang ba
 
 # Installasi App
 
-- NodeJS >= 20.x
+- Bun >= 1.1
 - Jalankan perintah di terminal
 
 ```sh
@@ -25,20 +25,20 @@ git clone https://github.com/wajik45/wajik-anime-api.git
 cd wajik-anime-api
 
 # install dependensi
-npm install
+bun install
 
 # menjalankan server mode development
-npm run dev
+bun run dev
 ```
 
 # Build App
 
 ```sh
 # build
-npm run build
+bun run build
 
 # menjalankan server
-npm start
+bun run start
 ```
 
 - Server akan berjalan di http://localhost:3001

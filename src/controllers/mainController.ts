@@ -1,66 +1,84 @@
-import type { NextFunction, Request, Response } from "express";
+import type { Context } from "hono";
 import { setResponseError } from "@helpers/error";
 import { otakudesuInfo } from "@otakudesu/index";
 import { samehadakuInfo } from "@samehadaku/index";
 import generatePayload from "@helpers/payload";
-import path from "path";
-import fs from "fs";
+import { readFile } from "fs/promises";
+import { existsSync } from "fs";
+import { join } from "path";
+
+const projectRoot = process.cwd();
+const viewDirectories = [
+  join(projectRoot, "dist/public/views"),
+  join(projectRoot, "src/public/views"),
+];
+const animDirectories = [
+  join(projectRoot, "dist/anims"),
+  join(projectRoot, "src/anims"),
+];
+
+async function renderHtml(c: Context, relativePath: string) {
+  let htmlContent: string | undefined;
+
+  for (const basePath of viewDirectories) {
+    const filePath = join(basePath, relativePath);
+
+    if (!existsSync(filePath)) {
+      continue;
+    }
+
+    htmlContent = await readFile(filePath, "utf-8");
+
+    break;
+  }
+
+  if (!htmlContent) {
+    setResponseError(500, "gagal memuat halaman");
+  }
+
+  return c.html(htmlContent);
+}
+
+function animSourceExists(routePath: string): boolean {
+  const sanitizedRoute = routePath.replace(/^\//, "");
+
+  return animDirectories.some((basePath) =>
+    existsSync(join(basePath, sanitizedRoute)),
+  );
+}
 
 const mainController = {
-  getMainView(req: Request, res: Response, next: NextFunction): void {
-    try {
-      const getViewFile = (filePath: string) => {
-        return path.join(__dirname, "..", "public", "views", filePath);
-      };
-
-      res.sendFile(getViewFile("home.html"));
-    } catch (error) {
-      next(error);
-    }
+  async getMainView(c: Context) {
+    return renderHtml(c, "home.html");
   },
 
-  getMainViewData(req: Request, res: Response, next: NextFunction): void {
-    try {
-      function getData() {
-        const animeSources = {
-          otakudesu: otakudesuInfo,
-          samehadaku: samehadakuInfo,
-        };
+  async getMainViewData(c: Context) {
+    const animeSources = {
+      otakudesu: otakudesuInfo,
+      samehadaku: samehadakuInfo,
+    };
 
-        const data = {
-          message: "WAJIK ANIME API IS READY 🔥🔥🔥",
-          sources: Object.values(animeSources),
-        };
+    const data = {
+      message: "WAJIK ANIME API IS READY 🔥🔥🔥",
+      sources: Object.values(animeSources).reduce<
+        { title: string; route: string }[]
+      >((acc, source) => {
+        if (animSourceExists(source.baseUrlPath)) {
+          acc.push({
+            title: source.title,
+            route: source.baseUrlPath,
+          });
+        }
 
-        const newData: { message: string; sources: any[] } = {
-          message: data.message,
-          sources: [],
-        };
+        return acc;
+      }, []),
+    };
 
-        data.sources.forEach((source) => {
-          const exist = fs.existsSync(path.join(__dirname, "..", "anims", source.baseUrlPath));
-
-          if (exist) {
-            newData.sources.push({
-              title: source.title,
-              route: source.baseUrlPath,
-            });
-          }
-        });
-
-        return newData;
-      }
-
-      const data = getData();
-
-      res.json(generatePayload(res, { data }));
-    } catch (error) {
-      next(error);
-    }
+    return c.json(generatePayload(200, { data }));
   },
 
-  _404(req: Request, res: Response, next: NextFunction): void {
-    next(setResponseError(404, "halaman tidak ditemukan"));
+  _404(): never {
+    setResponseError(404, "halaman tidak ditemukan");
   },
 };
 

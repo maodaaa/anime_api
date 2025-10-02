@@ -1,8 +1,8 @@
 {
   "compilerOptions": {
-    "target": "ES2021",
-    "module": "CommonJS",
-    "lib": ["ES2021"],
+    "target": "ES2022",
+    "module": "ESNext",
+    "lib": ["ES2022", "DOM"],
     "outDir": "dist",
     "rootDir": "./src",
     "strict": true,
@@ -11,6 +11,7 @@
     "resolveJsonModule": true,
     "removeComments": true,
     "moduleResolution": "Node",
+    "types": ["bun-types"],
     "baseUrl": "./src",
     "paths": {
       "@otakudesu/*": ["anims/otakudesu/*"],
