@@ -3,25 +3,40 @@ import { setResponseError } from "@helpers/error";
 import { otakudesuInfo } from "@otakudesu/index";
 import { samehadakuInfo } from "@samehadaku/index";
 import generatePayload from "@helpers/payload";
-import { fileURLToPath } from "url";
 import { readFile } from "fs/promises";
 import { existsSync } from "fs";
+import { join } from "path";
 
-const viewsBaseUrl = new URL("../public/views/", import.meta.url);
-const animsBaseUrl = new URL("../anims/", import.meta.url);
+const projectRoot = process.cwd();
+const viewDirectories = [
+  join(projectRoot, "dist/public/views"),
+  join(projectRoot, "src/public/views"),
+];
+const animDirectories = [
+  join(projectRoot, "dist/anims"),
+  join(projectRoot, "src/anims"),
+];
 
 async function renderHtml(c: Context, relativePath: string) {
-  const filePath = fileURLToPath(new URL(relativePath, viewsBaseUrl));
-  const html = await readFile(filePath, "utf-8");
+  for (const basePath of viewDirectories) {
+    const filePath = join(basePath, relativePath);
 
-  return c.html(html);
+    if (existsSync(filePath)) {
+      const html = await readFile(filePath, "utf-8");
+
+      return c.html(html);
+    }
+  }
+
+  setResponseError(500, "gagal memuat halaman");
 }
 
 function animSourceExists(routePath: string): boolean {
   const sanitizedRoute = routePath.replace(/^\//, "");
-  const absolutePath = fileURLToPath(new URL(sanitizedRoute, animsBaseUrl));
 
-  return existsSync(absolutePath);
+  return animDirectories.some((basePath) =>
+    existsSync(join(basePath, sanitizedRoute)),
+  );
 }
 
 const mainController = {
