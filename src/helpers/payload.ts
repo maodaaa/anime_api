@@ -1,4 +1,3 @@
-import type { Response } from "express";
 import http from "http";
 
 export interface Pagination {
@@ -25,7 +24,7 @@ export interface Payload {
   pagination: Pagination | null;
 }
 
-export default function generatePayload(res: Response, props?: PayloadProps): Payload {
+export default function generatePayload(statusCode: number, props?: PayloadProps): Payload {
   const payload: Payload = {
     statusCode: 500,
     statusMessage: "",
@@ -45,12 +44,12 @@ export default function generatePayload(res: Response, props?: PayloadProps): Pa
     return true;
   };
 
-  payload.statusCode = res.statusCode;
-  payload.statusMessage = http.STATUS_CODES[res.statusCode] || "";
+  payload.statusCode = statusCode;
+  payload.statusMessage = http.STATUS_CODES[statusCode] || "";
   payload.message = props?.message || "";
   payload.data = props?.data || null;
   payload.pagination = props?.pagination || null;
-  payload.ok = isOk(res.statusCode);
+  payload.ok = isOk(statusCode);
 
   return payload;
 }

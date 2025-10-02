@@ -1,11 +1,10 @@
+import { Hono } from "hono";
 import { serverCache } from "@middlewares/cache";
 import mainController from "@controllers/mainController";
-import express from "express";
 
-const mainRoute = express.Router();
+const mainRoute = new Hono();
 
-mainRoute.get("/", mainController.getMainView);
-mainRoute.get("/view-data", serverCache(), mainController.getMainViewData);
-mainRoute.get("*", mainController._404);
+mainRoute.get("/", (c) => mainController.getMainView(c));
+mainRoute.get("/view-data", serverCache(), (c) => mainController.getMainViewData(c));
 
 export default mainRoute;

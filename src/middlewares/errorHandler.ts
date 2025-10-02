@@ -1,5 +1,5 @@
 import axios from "axios";
-import type { NextFunction, Request, Response } from "express";
+import type { Context } from "hono";
 import generatePayload from "@helpers/payload";
 import type { UpstreamDiagnostic } from "@services/dataFetcher";
 
@@ -22,9 +22,7 @@ function resolveTargetUrl(error: any): string {
 }
 
 function describeUpstreamBlock(targetUrl: string, upstream?: UpstreamDiagnostic): string {
-  const provider = upstream?.provider && upstream.provider !== "unknown"
-    ? upstream.provider
-    : "sumber upstream";
+  const provider = upstream?.provider && upstream.provider !== "unknown" ? upstream.provider : "sumber upstream";
   const context = upstream?.requestLabel ? ` [request: ${upstream.requestLabel}]` : "";
 
   switch (upstream?.reason) {
@@ -63,17 +61,20 @@ function buildAxiosMessage(error: any): string {
   return error?.message || "Terjadi kesalahan pada permintaan upstream.";
 }
 
-export default function errorHandler(err: any, req: Request, res: Response, next: NextFunction) {
+export default function errorHandler(err: any, c: Context) {
   if (axios.isAxiosError(err)) {
     const status = err.response?.status ?? 500;
     const message = buildAxiosMessage(err);
 
-    return res.status(status).json(generatePayload(res, { message }));
+    return c.json(generatePayload(status, { message }), status);
   }
 
-  if (typeof err.status === "number") {
-    return res.status(err.status).json(generatePayload(res, { message: err.message }));
+  if (typeof err?.status === "number") {
+    return c.json(generatePayload(err.status, { message: err.message }), err.status);
   }
 
-  res.status(500).json(generatePayload(res, { message: err.message }));
+  const status = 500;
+  const message = err?.message || "Terjadi kesalahan pada sistem.";
+
+  return c.json(generatePayload(status, { message }), status);
 }

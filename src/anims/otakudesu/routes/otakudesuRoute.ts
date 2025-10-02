@@ -1,24 +1,24 @@
+import { Hono } from "hono";
 import { serverCache } from "@middlewares/cache";
 import controller from "@otakudesu/controllers/otakudesuController";
-import express from "express";
 
-const otakudesuRoute = express.Router();
+const otakudesuRoute = new Hono();
 
 otakudesuRoute
-  .get("/", controller.getMainView)
-  .get("/view-data", serverCache(), controller.getMainViewData)
-  .get("/home", serverCache(10), controller.getHome)
-  .get("/schedule", serverCache(10), controller.getSchedule)
-  .get("/anime", serverCache(10), controller.getAllAnimes)
-  .get("/genres", serverCache(), controller.getAllGenres)
-  .get("/ongoing", serverCache(10), controller.getOngoingAnimes)
-  .get("/completed", serverCache(10), controller.getCompletedAnimes)
-  .get("/search", serverCache(10), controller.getSearch)
-  .get("/genres/:genreId", serverCache(10), controller.getGenreAnimes)
-  .get("/anime/:animeId", serverCache(30), controller.getAnimeDetails)
-  .get("/episode/:episodeId", serverCache(30), controller.getAnimeEpisode)
-  .get("/server/:serverId", serverCache(3), controller.getServerUrl)
-  .post("/server/:serverId", serverCache(3), controller.getServerUrl)
-  .get("/batch/:batchId", serverCache(30), controller.getAnimeBatch);
+  .get("/", (c) => controller.getMainView(c))
+  .get("/view-data", serverCache(), (c) => controller.getMainViewData(c))
+  .get("/home", serverCache(10), (c) => controller.getHome(c))
+  .get("/schedule", serverCache(10), (c) => controller.getSchedule(c))
+  .get("/anime", serverCache(10), (c) => controller.getAllAnimes(c))
+  .get("/genres", serverCache(), (c) => controller.getAllGenres(c))
+  .get("/ongoing", serverCache(10), (c) => controller.getOngoingAnimes(c))
+  .get("/completed", serverCache(10), (c) => controller.getCompletedAnimes(c))
+  .get("/search", serverCache(10), (c) => controller.getSearch(c))
+  .get("/genres/:genreId", serverCache(10), (c) => controller.getGenreAnimes(c))
+  .get("/anime/:animeId", serverCache(30), (c) => controller.getAnimeDetails(c))
+  .get("/episode/:episodeId", serverCache(30), (c) => controller.getAnimeEpisode(c))
+  .get("/server/:serverId", serverCache(3), (c) => controller.getServerUrl(c))
+  .post("/server/:serverId", serverCache(3), (c) => controller.getServerUrl(c))
+  .get("/batch/:batchId", serverCache(30), (c) => controller.getAnimeBatch(c));
 
 export default otakudesuRoute;

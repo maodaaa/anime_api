@@ -1,72 +1,67 @@
-import type { Request, Response, NextFunction } from "express";
-import { type Payload } from "@helpers/payload";
+import type { Context, Next } from "hono";
+import type { Payload } from "@helpers/payload";
 import { defaultTTL, cache } from "@libs/lruCache";
 import path from "path";
 
-/**
- * @param ttl minutes
- */
+function createCacheKey(c: Context): string {
+  try {
+    const url = new URL(c.req.url);
+
+    return path.join(url.pathname, "/").replace(/\\/g, "/");
+  } catch (error) {
+    return path.join(c.req.path, "/").replace(/\\/g, "/");
+  }
+}
+
 export function serverCache(ttl?: number, responseType: "json" | "text" = "json") {
-  return (req: Request, res: Response, next: NextFunction) => {
+  return async (c: Context, next: Next) => {
     const newTTL = ttl ? 1000 * 60 * ttl : defaultTTL;
-    const key = path.join(req.originalUrl, "/").replace(/\\/g, "/");
+    const key = createCacheKey(c);
     const cachedData = cache.get(key);
 
     if (cachedData) {
-      // console.log("hit");
-
-      if (typeof cachedData === "object") {
-        // console.log("ini object");
-
-        return res.json(cachedData);
+      if (responseType === "json") {
+        const payload = cachedData as Payload;
+        return c.json(payload, payload.statusCode ?? 200);
       }
 
       if (typeof cachedData === "string") {
-        // console.log("ini string");
-
-        return res.send(cachedData);
+        return c.body(cachedData);
       }
 
-      // console.log("ini bukan object / string");
-
-      return res.send(String(cachedData));
+      return c.body(String(cachedData));
     }
 
-    // console.log("miss");
+    await next();
 
-    if (responseType === "json") {
-      const originalJson = res.json.bind(res);
-
-      res.json = (body: Payload) => {
-        if (res.statusCode < 399 && body.ok) {
-          cache.set(key, body, { ttl: newTTL });
-        }
-
-        return originalJson(body);
-      };
-    } else {
-      const originalSend = res.send.bind(res);
-
-      res.send = (body: any) => {
-        if (res.statusCode < 399) {
-          cache.set(key, body, { ttl: newTTL });
-        }
-
-        return originalSend(body);
-      };
+    if (!c.res || c.res.status >= 399) {
+      return;
     }
 
-    next();
+    try {
+      if (responseType === "json") {
+        const cloned = c.res.clone();
+        const body = (await cloned.json()) as Payload;
+
+        if (body && typeof body === "object" && body.ok) {
+          cache.set(key, body, { ttl: newTTL });
+        }
+      } else {
+        const cloned = c.res.clone();
+        const body = await cloned.text();
+
+        cache.set(key, body, { ttl: newTTL });
+      }
+    } catch (error) {
+      // ignore caching errors
+    }
   };
 }
 
-/**
- * @param maxAge minutes
- */
 export function clientCache(maxAge?: number) {
-  return (req: Request, res: Response, next: NextFunction) => {
-    res.setHeader("Cache-Control", `public, max-age=${maxAge ? maxAge * 60 : 60}`);
+  return async (c: Context, next: Next) => {
+    c.header("Cache-Control", `public, max-age=${maxAge ? maxAge * 60 : 60}`);
 
-    next();
+    await next();
   };
 }
