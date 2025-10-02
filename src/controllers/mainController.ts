@@ -18,17 +18,25 @@ const animDirectories = [
 ];
 
 async function renderHtml(c: Context, relativePath: string) {
+  let htmlContent: string | undefined;
+
   for (const basePath of viewDirectories) {
     const filePath = join(basePath, relativePath);
 
-    if (existsSync(filePath)) {
-      const html = await readFile(filePath, "utf-8");
-
-      return c.html(html);
+    if (!existsSync(filePath)) {
+      continue;
     }
+
+    htmlContent = await readFile(filePath, "utf-8");
+
+    break;
   }
 
-  setResponseError(500, "gagal memuat halaman");
+  if (!htmlContent) {
+    setResponseError(500, "gagal memuat halaman");
+  }
+
+  return c.html(htmlContent);
 }
 
 function animSourceExists(routePath: string): boolean {

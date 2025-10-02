@@ -17,3 +17,12 @@ var animDirectories = [
   }
   setResponseError(500, "gagal memuat halaman");
   return animDirectories.some((basePath) => existsSync2(join2(basePath, sanitizedRoute)));
+  let htmlContent;
+    if (!existsSync2(filePath)) {
+      continue;
+    htmlContent = await readFile3(filePath, "utf-8");
+    break;
+  }
+  if (!htmlContent) {
+    setResponseError(500, "gagal memuat halaman");
+  return c.html(htmlContent);
